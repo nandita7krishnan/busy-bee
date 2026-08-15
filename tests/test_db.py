@@ -49,6 +49,21 @@ def test_get_recent_done_limits_and_orders():
     assert [r["text"] for r in rows] == ["item 4", "item 3", "item 2"]
 
 
+def test_get_next_todo_shows_most_recently_planned():
+    for i in range(5):
+        db.upsert_item(
+            project="p1",
+            item_type="todo",
+            text=f"todo {i}",
+            created_at=f"2026-08-14T{10 + i:02d}:00:00+00:00",
+            resolved_at=None,
+            source="agent",
+            source_id=f"todo-id{i}",
+        )
+    rows = db.get_next_todo("p1", limit=3)
+    assert [r["text"] for r in rows] == ["todo 4", "todo 3", "todo 2"]
+
+
 def test_get_unresolved_excludes_resolved():
     db.upsert_item("p1", "blocker", "stuck", "2026-08-14T10:00:00+00:00", None, "agent", "b1")
     db.upsert_item(

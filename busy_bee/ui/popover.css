@@ -6,10 +6,20 @@
   --border: #e5e5ea;
   --coral: #ff6f59;
   --amber: #e8a33d;
-  --teal: #2aa198;
-  --gray: #b8b8bd;
   --badge-bg: #ff3b30;
   --badge-text: #ffffff;
+
+  /* Per-project identity colors -- picked away from --coral/--amber so
+     a project's own color is never mistaken for a blocker/question
+     badge, which are the actual "needs attention" signal. */
+  --proj-0: #5b8def;
+  --proj-1: #9b59b6;
+  --proj-2: #16a085;
+  --proj-3: #e67e22;
+  --proj-4: #e84393;
+  --proj-5: #00b8d9;
+  --proj-6: #6c5ce7;
+  --proj-7: #8e9b1f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -52,14 +62,18 @@ body {
   background: var(--card-bg);
   border-radius: 8px;
   margin-bottom: 8px;
-  border-left: 4px solid var(--gray);
+  border-left: 4px solid var(--border);
   overflow: hidden;
 }
 
-.card.state-blocked { border-left-color: var(--coral); }
-.card.state-question { border-left-color: var(--amber); }
-.card.state-active { border-left-color: var(--teal); }
-.card.state-idle { border-left-color: var(--gray); }
+.card.proj-0 { border-left-color: var(--proj-0); }
+.card.proj-1 { border-left-color: var(--proj-1); }
+.card.proj-2 { border-left-color: var(--proj-2); }
+.card.proj-3 { border-left-color: var(--proj-3); }
+.card.proj-4 { border-left-color: var(--proj-4); }
+.card.proj-5 { border-left-color: var(--proj-5); }
+.card.proj-6 { border-left-color: var(--proj-6); }
+.card.proj-7 { border-left-color: var(--proj-7); }
 
 .card-header {
   display: flex;

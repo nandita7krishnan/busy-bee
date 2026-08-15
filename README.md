@@ -74,15 +74,24 @@ dashctl resolve blocker|question <id>
 
 **Run the dashboard:**
 
+Launch "Busy Bee" from Spotlight (⌘Space, type "busy bee") or
+Launchpad -- `install.sh` builds `/Applications/Busy Bee.app` as a
+thin wrapper around the venv, so no terminal is needed day to day.
+(Re-run `scripts/build_app_bundle.sh` after pulling code changes to
+refresh it -- it's a wrapper, not a frozen build, so it always runs
+whatever's currently in `.venv`.)
+
+Or, from a terminal:
+
 ```
 busy-bee
 ```
 
-Starts the tray icon (🐝), the aggregator (polls every 5s by default,
-configurable in `~/.claude-dashboard/config.json`), and the popover UI.
-Click the tray icon's "Show Dashboard" item to open it. Click a
-project name inside a card to open a terminal and resume that
-project's Claude Code session.
+Either way, this starts the tray icon (🐝), the aggregator (polls
+every 5s by default, configurable in
+`~/.claude-dashboard/config.json`), and the popover UI. Click the tray
+icon's "Show Dashboard" item to open it. Click a project name inside a
+card to open a terminal and resume that project's Claude Code session.
 
 ## Repo layout
 

@@ -156,10 +156,12 @@ def get_recent_done(project: str, limit: int = 3) -> list[sqlite3.Row]:
 
 
 def get_next_todo(project: str, limit: int = 3) -> list[sqlite3.Row]:
+    """The most recently logged unresolved todos -- i.e. whatever was
+    most immediately planned, not the oldest backlog items."""
     with connect() as conn:
         return conn.execute(
             "SELECT * FROM items WHERE project = ? AND type = 'todo' AND resolved_at IS NULL "
-            "ORDER BY created_at ASC LIMIT ?",
+            "ORDER BY created_at DESC LIMIT ?",
             (project, limit),
         ).fetchall()
 

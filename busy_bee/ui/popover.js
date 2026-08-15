@@ -4,11 +4,14 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function cardStateClass(project) {
-  if (project.blockers.length > 0) return "state-blocked";
-  if (project.questions.length > 0) return "state-question";
-  if (project.status === "active") return "state-active";
-  return "state-idle";
+const PROJECT_COLOR_COUNT = 8;
+
+function projectColorClass(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return `proj-${hash % PROJECT_COLOR_COUNT}`;
 }
 
 function renderColumn(title, items, className, emptyLabel) {
@@ -29,9 +32,9 @@ function renderFlagLine(item, type) {
 }
 
 function renderCard(project) {
-  const stateClass = cardStateClass(project);
+  const colorClass = projectColorClass(project.name);
   const hasFlags = project.blockers.length > 0 || project.questions.length > 0;
-  const expanded = hasFlags; // resets every open, per spec
+  const expanded = true; // always expanded by default; chevron can still collapse manually
 
   const badges = [
     project.blockers.length
@@ -50,7 +53,7 @@ function renderCard(project) {
     : "";
 
   return `
-    <div class="card ${stateClass} ${expanded ? "expanded" : ""}" data-project="${escapeHtml(project.name)}">
+    <div class="card ${colorClass} ${expanded ? "expanded" : ""}" data-project="${escapeHtml(project.name)}">
       <div class="card-header" data-toggle>
         <span class="chevron">&#9656;</span>
         <span class="project-name" data-open-terminal>${escapeHtml(project.name)}</span>
