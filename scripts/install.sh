@@ -17,7 +17,10 @@ ln -sf "$VENV_DIR/bin/busy-bee" "$BIN_DIR/busy-bee"
 
 mkdir -p "$HOME/.claude-dashboard"
 
+"$VENV_DIR/bin/dashctl" setup-global
+
+echo
 echo "Installed. Make sure $BIN_DIR is on PATH."
 echo "Run 'busy-bee' to start the menu bar app."
-echo "From each project you want tracked, run 'dashctl init' and paste"
-echo "claude_md_snippet.md into that project's CLAUDE.md."
+echo "Any project you work in from now on will register itself the"
+echo "first time an agent logs status -- no per-project setup needed."

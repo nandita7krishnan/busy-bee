@@ -42,19 +42,24 @@ This creates a `.venv`, installs the package + `rumps`/`pywebview`, and
 symlinks `dashctl` and `busy-bee` into `~/.local/bin`. Make sure that's
 on your `PATH`.
 
+It also runs `dashctl setup-global` for you (see below) -- one-time,
+machine-wide setup, so no individual project needs any manual wiring.
+
 ## Usage
 
-**Track a project:**
+**Tracking projects is automatic.** `dashctl setup-global` (run once by
+the installer, or re-run any time with `dashctl setup-global`) installs
+[`claude_md_snippet.md`](./claude_md_snippet.md) into
+`~/.claude/CLAUDE.md` and the [`Stop` hook](./hooks/stop_hook.py) into
+`~/.claude/settings.json` at the Claude Code *user* level, so it
+applies to every project, not just ones you remember to configure.
+From there, any project auto-registers itself the first time an agent
+in it calls `dashctl` -- no `dashctl init`, no per-project CLAUDE.md
+edits, no per-project hook config.
 
-```
-cd ~/code/my-side-project
-dashctl init
-```
-
-Then paste [`claude_md_snippet.md`](./claude_md_snippet.md) into that
-project's `CLAUDE.md`, and wire up the `Stop` hook in that project's
-`.claude/settings.json` (see [`hooks/stop_hook.py`](./hooks/stop_hook.py)
-for the exact config).
+(`dashctl init [--name NAME]` still exists if you want to register a
+project under a name other than its directory's basename, or register
+it before the agent logs anything.)
 
 **Log status** (this is what the agent calls mid-session, and what the
 `Stop` hook nudges it to do if it forgets):

@@ -22,6 +22,32 @@ def test_done_and_todo_logged(tmp_path, monkeypatch, capsys):
     assert status_file.exists()
 
 
+def test_log_auto_registers_project_without_init(tmp_path, monkeypatch):
+    project_dir = tmp_path / "auto-proj"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+
+    assert config.list_projects() == []
+    cli.main(["done", "shipped it"])
+
+    projects = config.list_projects()
+    assert len(projects) == 1
+    assert projects[0]["name"] == "auto-proj"
+    assert projects[0]["path"] == str(project_dir.resolve())
+
+
+def test_log_does_not_duplicate_registration(tmp_path, monkeypatch):
+    project_dir = tmp_path / "auto-proj"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+
+    cli.main(["done", "first"])
+    cli.main(["todo", "second"])
+    cli.main(["blocker", "third"])
+
+    assert len(config.list_projects()) == 1
+
+
 def test_blocker_then_resolve(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     cli.main(["blocker", "need creds"])

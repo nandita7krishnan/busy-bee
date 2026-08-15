@@ -1,9 +1,11 @@
 ## busy-bee status tracking
 
-This project is tracked by busy-bee (a menu bar dashboard across side
-projects). Before doing anything else in a session, confirm `dashctl`
-is on PATH (`which dashctl`); if it's missing, skip the rest of this
-section and mention it in your response once.
+Every project on this machine is tracked by busy-bee (a menu bar
+dashboard across side projects). Before doing anything else in a
+session, confirm `dashctl` is on PATH (`which dashctl`); if it's
+missing, skip the rest of this section and mention it in your response
+once. No setup is needed beyond that -- the current directory
+auto-registers itself the first time any command below runs.
 
 Log status as you work, using one-line, plain-language descriptions:
 
