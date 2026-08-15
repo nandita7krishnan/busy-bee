@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from busy_bee import process_utils
+
 ItemType = Literal["done", "todo", "blocker", "question"]
 VALID_TYPES: tuple[ItemType, ...] = ("done", "todo", "blocker", "question")
 
@@ -54,6 +56,7 @@ def add_item(project_root: Path, item_type: ItemType, text: str, source: str = "
         "created_at": _now(),
         "resolved_at": None,
         "source": source,
+        "terminal_tty": process_utils.find_claude_ancestor_tty(),
     }
     items.append(item)
     _save(project_root, items)
@@ -75,6 +78,15 @@ def resolve_item(project_root: Path, item_type: ItemType, item_id: str) -> bool:
 
 def all_items(project_root: Path) -> list[dict]:
     return _load(project_root)
+
+
+def latest_terminal_tty(items: list[dict]) -> str | None:
+    """The tty of the most recent item that has one recorded -- i.e.
+    whichever terminal most recently logged status for this project."""
+    with_tty = [i for i in items if i.get("terminal_tty")]
+    if not with_tty:
+        return None
+    return max(with_tty, key=lambda i: i["created_at"])["terminal_tty"]
 
 
 def has_logged_this_turn(project_root: Path, since_seconds: int = 120) -> bool:

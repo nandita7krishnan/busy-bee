@@ -1,12 +1,13 @@
 import pytest
 
-from busy_bee import cli, config
+from busy_bee import cli, config, project_store
 
 
 @pytest.fixture(autouse=True)
 def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "cfg" / "config.json")
     monkeypatch.setattr(config, "HOME_DIR", tmp_path / "cfg")
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: None)
     yield
 
 

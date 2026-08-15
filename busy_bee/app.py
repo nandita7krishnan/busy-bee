@@ -75,7 +75,9 @@ class Api:
         if project is None:
             return
         cfg = config.load_config()
-        terminal_launcher.resume_project(project["path"], cfg.get("terminal_app", "Terminal"))
+        terminal_launcher.resume_project(
+            project["path"], cfg.get("terminal_app", "Terminal"), tty=project["terminal_tty"]
+        )
 
     def resolve_item(self, item_id: int) -> bool:
         return db.resolve_item_by_id(item_id)

@@ -8,6 +8,7 @@ from busy_bee import aggregator, config, db, project_store
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "db.sqlite")
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: None)
     db.init_db()
     yield
 
@@ -59,6 +60,18 @@ def test_sync_project_merges_items_and_status(tmp_path):
     assert [r["text"] for r in done_rows] == ["shipped feature"]
     blockers = db.get_unresolved("proj", "blocker")
     assert [b["text"] for b in blockers] == ["need API key"]
+
+
+def test_sync_project_propagates_terminal_tty(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    project_store.add_item(project_dir, "done", "did a thing")
+
+    aggregator.sync_project("proj", str(project_dir))
+
+    project = db.get_project("proj")
+    assert project["terminal_tty"] == "ttys002"
 
 
 def test_sync_all_uses_config(tmp_path, monkeypatch):

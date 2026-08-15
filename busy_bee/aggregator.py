@@ -43,7 +43,8 @@ def sync_project(name: str, path: str) -> None:
             source_id=item["id"],
         )
     status = derive_status(items)
-    db.upsert_project(name, str(root), status=status)
+    terminal_tty = project_store.latest_terminal_tty(items)
+    db.upsert_project(name, str(root), status=status, terminal_tty=terminal_tty)
 
 
 def sync_all() -> int:

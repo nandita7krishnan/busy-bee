@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT PRIMARY KEY,
   path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'idle',
-  last_seen_at TIMESTAMP
+  last_seen_at TIMESTAMP,
+  terminal_tty TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_project_type ON items(project, type);
@@ -53,24 +54,37 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Adds columns to tables that already existed before this column
+    was introduced -- CREATE TABLE IF NOT EXISTS is a no-op against a
+    table that's already there."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+    if "terminal_tty" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN terminal_tty TEXT")
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
 
 
-def upsert_project(name: str, path: str, status: str | None = None) -> None:
+def upsert_project(
+    name: str, path: str, status: str | None = None, terminal_tty: str | None = None
+) -> None:
     with connect() as conn:
         row = conn.execute("SELECT status FROM projects WHERE name = ?", (name,)).fetchone()
         if row is None:
             conn.execute(
-                "INSERT INTO projects (name, path, status, last_seen_at) VALUES (?, ?, ?, ?)",
-                (name, path, status or "idle", datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO projects (name, path, status, last_seen_at, terminal_tty) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (name, path, status or "idle", datetime.now(timezone.utc).isoformat(), terminal_tty),
             )
         else:
             conn.execute(
-                "UPDATE projects SET path = ?, status = COALESCE(?, status), last_seen_at = ? "
-                "WHERE name = ?",
-                (path, status, datetime.now(timezone.utc).isoformat(), name),
+                "UPDATE projects SET path = ?, status = COALESCE(?, status), last_seen_at = ?, "
+                "terminal_tty = COALESCE(?, terminal_tty) WHERE name = ?",
+                (path, status, datetime.now(timezone.utc).isoformat(), terminal_tty, name),
             )
 
 

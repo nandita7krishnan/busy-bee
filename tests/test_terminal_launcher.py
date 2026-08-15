@@ -24,74 +24,86 @@ def test_list_terminal_tabs_returns_empty_on_failure(monkeypatch):
     assert tl._list_terminal_tabs() == []
 
 
-def test_claude_cwd_for_tty_finds_claude_process(monkeypatch):
-    calls = []
-
-    def fake_run(cmd, capture_output, text):
-        calls.append(cmd)
-        if cmd[0] == "ps":
-            return FakeResult(stdout=" 4022 -zsh\n 4098 claude\n")
-        if cmd[0] == "lsof":
-            assert "4098" in cmd
-            return FakeResult(stdout="p4098\nfcwd\nn/Users/me/my-project\n")
-        raise AssertionError(f"unexpected command {cmd}")
-
-    monkeypatch.setattr(tl.subprocess, "run", fake_run)
-    assert tl._claude_cwd_for_tty("/dev/ttys000") == "/Users/me/my-project"
-
-
-def test_claude_cwd_for_tty_returns_none_without_claude_process(monkeypatch):
+def test_tty_has_live_claude_true_when_claude_attached(monkeypatch):
     monkeypatch.setattr(
-        tl.subprocess, "run", lambda cmd, **k: FakeResult(stdout=" 9891 -zsh\n")
+        tl.subprocess, "run", lambda cmd, **k: FakeResult(stdout="-zsh\nclaude\n")
     )
-    assert tl._claude_cwd_for_tty("/dev/ttys003") is None
+    assert tl._tty_has_live_claude("ttys002") is True
 
 
-def test_find_existing_session_matches_by_cwd(monkeypatch):
+def test_tty_has_live_claude_false_without_claude(monkeypatch):
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: FakeResult(stdout="-zsh\n"))
+    assert tl._tty_has_live_claude("ttys003") is False
+
+
+def test_find_tab_by_tty_normalizes_dev_prefix(monkeypatch):
     monkeypatch.setattr(
         tl,
         "_list_terminal_tabs",
-        lambda: [
-            {"window_id": "1", "tab_index": "1", "tty": "/dev/ttys000"},
-            {"window_id": "2", "tab_index": "1", "tty": "/dev/ttys001"},
-        ],
+        lambda: [{"window_id": "9", "tab_index": "2", "tty": "/dev/ttys002"}],
     )
-    cwds = {"/dev/ttys000": "/Users/me/other-project", "/dev/ttys001": "/Users/me/my-project"}
-    monkeypatch.setattr(tl, "_claude_cwd_for_tty", lambda tty: cwds.get(tty))
-
-    result = tl.find_existing_session("/Users/me/my-project")
-    assert result == {"window_id": "2", "tab_index": "1", "tty": "/dev/ttys001"}
-
-
-def test_find_existing_session_returns_none_when_no_match(monkeypatch):
-    monkeypatch.setattr(tl, "_list_terminal_tabs", lambda: [])
-    assert tl.find_existing_session("/Users/me/my-project") is None
+    assert tl._find_tab_by_tty("ttys002") == {
+        "window_id": "9",
+        "tab_index": "2",
+        "tty": "/dev/ttys002",
+    }
+    assert tl._find_tab_by_tty("ttys999") is None
 
 
-def test_resume_project_focuses_existing_session(monkeypatch):
+def test_resume_project_focuses_existing_session_when_tty_alive(monkeypatch):
     focused = {}
+    monkeypatch.setattr(tl, "_tty_has_live_claude", lambda tty: True)
     monkeypatch.setattr(
-        tl, "find_existing_session", lambda path: {"window_id": "9", "tab_index": "2"}
+        tl, "_find_tab_by_tty", lambda tty: {"window_id": "9", "tab_index": "2"}
     )
     monkeypatch.setattr(
         tl, "_focus_terminal_tab", lambda wid, idx: focused.update(window_id=wid, tab_index=idx)
     )
 
     def fail_if_called(cmd, **k):
-        raise AssertionError("should not open a new window when a session already exists")
+        raise AssertionError("should not open a new window when a live session exists")
 
     monkeypatch.setattr(tl.subprocess, "run", fail_if_called)
 
-    tl.resume_project("/Users/me/my-project")
+    tl.resume_project("/Users/me/my-project", tty="ttys002")
     assert focused == {"window_id": "9", "tab_index": "2"}
 
 
-def test_resume_project_opens_new_window_when_no_existing_session(monkeypatch, tmp_path):
-    monkeypatch.setattr(tl, "find_existing_session", lambda path: None)
+def test_resume_project_opens_new_window_when_no_tty_recorded(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd))
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
 
-    tl.resume_project(str(tmp_path))
+    tl.resume_project(str(tmp_path), tty=None)
     assert len(calls) == 1
     assert calls[0][0] == "osascript"
     assert "claude --continue" in calls[0][2]
+
+
+def test_resume_project_opens_new_window_when_tty_is_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(tl, "_tty_has_live_claude", lambda tty: False)
+
+    def fail_if_focus_attempted(*a, **k):
+        raise AssertionError("should not try to focus a dead tty")
+
+    monkeypatch.setattr(tl, "_find_tab_by_tty", fail_if_focus_attempted)
+
+    calls = []
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+
+    tl.resume_project(str(tmp_path), tty="ttys002")
+    assert len(calls) == 1
+    assert "claude --continue" in calls[0][2]
+
+
+def test_resume_project_ignores_tty_for_iterm(tmp_path, monkeypatch):
+    def fail_if_called(*a, **k):
+        raise AssertionError("tty reuse detection is Terminal.app-only")
+
+    monkeypatch.setattr(tl, "_tty_has_live_claude", fail_if_called)
+
+    calls = []
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+
+    tl.resume_project(str(tmp_path), terminal_app="iTerm", tty="ttys002")
+    assert len(calls) == 1
+    assert "iTerm" in calls[0][2]
