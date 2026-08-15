@@ -42,6 +42,15 @@ PLIST
 
 cat > "$APP_DIR/Contents/MacOS/BusyBee" <<LAUNCHER
 #!/bin/bash
+# exec-ing the venv's python binary directly would make macOS resolve
+# NSBundle.mainBundle() to *its* enclosing .app (Homebrew's own
+# Python.app), not this one -- LSUIElement then never applies, since
+# it's reading the wrong Info.plist entirely. Setting
+# __CFBundleIdentifier forces Foundation/AppKit to associate this
+# process with our bundle instead, regardless of the actual binary's
+# path. Same trick tools like Platypus use for interpreted-language
+# app bundles.
+export __CFBundleIdentifier="dev.busybee.app"
 exec "$VENV_BUSYBEE"
 LAUNCHER
 chmod +x "$APP_DIR/Contents/MacOS/BusyBee"
