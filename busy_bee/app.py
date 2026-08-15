@@ -92,6 +92,14 @@ class BusyBeeApp(rumps.App):
     @rumps.clicked("Show Dashboard")
     def show_dashboard(self, _sender) -> None:
         self.window.show()
+        # evaluate_js() blocks its calling thread waiting on a semaphore
+        # released from the main thread's run loop; since rumps.clicked
+        # callbacks fire *on* the main thread, calling it here directly
+        # would deadlock (main thread waits on itself). Run it from a
+        # throwaway thread instead.
+        threading.Thread(target=self._refresh_popover, daemon=True).start()
+
+    def _refresh_popover(self) -> None:
         self.window.evaluate_js("window.loadProjects && window.loadProjects()")
 
     def refresh_badge(self) -> None:
