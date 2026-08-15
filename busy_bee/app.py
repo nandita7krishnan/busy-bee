@@ -150,9 +150,6 @@ def main() -> None:
         js_api=Api(),
         width=360,
         height=480,
-        frameless=True,
-        easy_drag=False,
-        on_top=True,
         hidden=True,
     )
     app = BusyBeeApp(window)
