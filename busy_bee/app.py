@@ -1,9 +1,24 @@
 """busy-bee menu bar app.
 
-`rumps` owns the tray icon and app lifecycle; `pywebview` renders the
-popover UI (busy_bee/ui/*). The aggregator runs on a background thread
-inside this same process so the whole app is a single `busy-bee`
-command to launch.
+`rumps` builds the tray icon/menu; `pywebview` renders the popover UI
+(busy_bee/ui/*). Both are thin wrappers around the same singleton
+NSApplication, and macOS only allows ONE thread to run its blocking
+event loop (`NSApplication.run()`) -- whichever framework starts it
+second either crashes (pywebview refuses off the main thread) or
+deadlocks (rumps blocks forever on whatever thread calls it). Since
+pywebview *requires* the main thread for `webview.start()`, that's the
+one call allowed to block it. rumps' own loop-starting call
+(`AppHelper.runEventLoop`, the last line of `App.run()`) is neutered
+for the duration of that call so it just does its setup (status item,
+menu, timers) and returns immediately; the already-running pywebview
+loop then services the status item's events too, since it's the same
+NSApplication under the hood. The rumps setup itself is scheduled onto
+the main thread via `AppHelper.callAfter` once pywebview's loop is
+live, which is the sanctioned way to touch AppKit objects from a
+background thread in PyObjC.
+
+The aggregator runs on its own background thread inside this same
+process, so the whole app is a single `busy-bee` command to launch.
 
 Known v1 limitation: rumps doesn't expose a way to bind a left-click on
 the status item directly to an arbitrary handler without going through
@@ -18,6 +33,7 @@ import threading
 
 import rumps
 import webview
+from PyObjCTools import AppHelper
 
 from busy_bee import aggregator, config, db, terminal_launcher
 
@@ -69,31 +85,14 @@ class Api:
 
 
 class BusyBeeApp(rumps.App):
-    def __init__(self):
+    def __init__(self, window: webview.Window):
         super().__init__("busy-bee", title="🐝", menu=["Show Dashboard"])
-        self.window: webview.Window | None = None
-        self.api = Api()
-
-    def _ensure_window(self) -> webview.Window:
-        if self.window is None:
-            self.window = webview.create_window(
-                "busy-bee",
-                url=f"{UI_DIR}/popover.html",
-                js_api=self.api,
-                width=360,
-                height=480,
-                frameless=True,
-                easy_drag=False,
-                on_top=True,
-                hidden=True,
-            )
-        return self.window
+        self.window = window
 
     @rumps.clicked("Show Dashboard")
     def show_dashboard(self, _sender) -> None:
-        window = self._ensure_window()
-        window.show()
-        window.evaluate_js("window.loadProjects && window.loadProjects()")
+        self.window.show()
+        self.window.evaluate_js("window.loadProjects && window.loadProjects()")
 
     def refresh_badge(self) -> None:
         count = db.count_all_unresolved_blockers_and_questions()
@@ -111,21 +110,48 @@ def run_aggregator_thread() -> None:
     thread.start()
 
 
+def _start_rumps_setup_without_blocking(app: BusyBeeApp) -> None:
+    """Runs rumps' real App.run() setup (status item, menu, timers) but
+    without its final blocking call -- pywebview's loop, already running
+    on the main thread by the time this fires, services those events
+    instead. See module docstring for why this is necessary."""
+    original_run_event_loop = AppHelper.runEventLoop
+    AppHelper.runEventLoop = lambda *args, **kwargs: None
+    try:
+        app.run()
+    finally:
+        AppHelper.runEventLoop = original_run_event_loop
+    app.start_badge_timer()
+    app.refresh_badge()
+
+
+def _on_webview_loop_started(app: BusyBeeApp) -> None:
+    """Runs on a background thread spawned by webview.start(); dispatches
+    the actual AppKit setup back onto the main thread, which is the
+    PyObjC-sanctioned way to touch AppKit objects from off-thread."""
+    run_aggregator_thread()
+    AppHelper.callAfter(_start_rumps_setup_without_blocking, app)
+
+
 def main() -> None:
     db.init_db()
-    run_aggregator_thread()
 
-    app = BusyBeeApp()
-    app.start_badge_timer()
-
-    # pywebview needs its own loop; run it on a background thread and let
-    # rumps (NSApplication) own the main thread, which macOS requires.
-    webview_thread = threading.Thread(
-        target=lambda: webview.start(gui="cocoa", debug=False), daemon=True
+    window = webview.create_window(
+        "busy-bee",
+        url=f"{UI_DIR}/popover.html",
+        js_api=Api(),
+        width=360,
+        height=480,
+        frameless=True,
+        easy_drag=False,
+        on_top=True,
+        hidden=True,
     )
-    webview_thread.start()
+    app = BusyBeeApp(window)
 
-    app.run()
+    # pywebview requires the main thread for its blocking loop; this call
+    # doesn't return until the app quits.
+    webview.start(func=_on_webview_loop_started, args=(app,), gui="cocoa", debug=False)
 
 
 if __name__ == "__main__":
