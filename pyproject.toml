@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "busy-bee"
+version = "0.1.0"
+description = "A macOS menu bar dashboard across Claude Code side projects."
+requires-python = ">=3.10"
+dependencies = [
+    "rumps>=0.4.0",
+    "pywebview>=5.0",
+]
+
+[project.scripts]
+dashctl = "busy_bee.cli:main"
+busy-bee = "busy_bee.app:main"
+
+[tool.setuptools.packages.find]
+include = ["busy_bee*"]
+
+[tool.setuptools.package-data]
+busy_bee = ["ui/*"]
+
+[project.optional-dependencies]
+dev = ["pytest"]

@@ -1,0 +1,60 @@
+from datetime import datetime, timedelta, timezone
+
+from busy_bee import project_store
+
+
+def test_add_item_creates_status_file(tmp_path):
+    item = project_store.add_item(tmp_path, "done", "shipped the thing")
+    assert item["type"] == "done"
+    assert item["text"] == "shipped the thing"
+    assert item["resolved_at"] is None
+
+    items = project_store.all_items(tmp_path)
+    assert len(items) == 1
+    assert items[0]["id"] == item["id"]
+
+
+def test_add_item_rejects_invalid_type(tmp_path):
+    try:
+        project_store.add_item(tmp_path, "nope", "text")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_resolve_item_marks_resolved(tmp_path):
+    item = project_store.add_item(tmp_path, "blocker", "waiting on API key")
+    assert project_store.resolve_item(tmp_path, "blocker", item["id"]) is True
+
+    items = project_store.all_items(tmp_path)
+    resolved = next(i for i in items if i["id"] == item["id"])
+    assert resolved["resolved_at"] is not None
+
+
+def test_resolve_unknown_item_returns_false(tmp_path):
+    assert project_store.resolve_item(tmp_path, "blocker", "does-not-exist") is False
+
+
+def test_resolve_rejects_done_or_todo(tmp_path):
+    item = project_store.add_item(tmp_path, "done", "x")
+    try:
+        project_store.resolve_item(tmp_path, "done", item["id"])
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_has_logged_this_turn(tmp_path):
+    assert project_store.has_logged_this_turn(tmp_path) is False
+    project_store.add_item(tmp_path, "done", "just now")
+    assert project_store.has_logged_this_turn(tmp_path, since_seconds=120) is True
+
+
+def test_has_logged_this_turn_respects_window(tmp_path, monkeypatch):
+    item = project_store.add_item(tmp_path, "done", "a while ago")
+    items = project_store.all_items(tmp_path)
+    stale_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    items[0]["created_at"] = stale_time
+    project_store._save(tmp_path, items)
+
+    assert project_store.has_logged_this_turn(tmp_path, since_seconds=120) is False
