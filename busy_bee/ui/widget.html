@@ -11,15 +11,34 @@
       height: 100%;
       background: transparent;
       overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
+
+    /* Icon is sized smaller than the window so the float animation
+       has room to move without clipping against the window edge. */
     #icon {
-      width: 100%;
-      height: 100%;
+      width: 80%;
+      height: 80%;
       display: block;
       cursor: pointer;
       -webkit-user-select: none;
       user-select: none;
       -webkit-user-drag: none;
+      animation: bee-float 2.6s ease-in-out infinite;
+      transform-origin: 50% 65%;
+    }
+
+    @keyframes bee-float {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      25%      { transform: translateY(-4px) rotate(-7deg); }
+      50%      { transform: translateY(-1px) rotate(0deg); }
+      75%      { transform: translateY(-4px) rotate(7deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #icon { animation: none; }
     }
   </style>
 </head>
