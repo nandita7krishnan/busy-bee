@@ -94,16 +94,23 @@ closing/destroying it, so "Show Dashboard" keeps working afterward --
 consistent with the rest of the app staying alive in the background.
 
 **If you quit it and want it back, launch "Open Busy Bee" from
-Spotlight, Launchpad, or the Dock** -- `install.sh` also builds this
-as a separate tiny app (`scripts/build_reopener_app.sh`). It's not the
-same app as busy-bee itself: it doesn't touch the menu bar or create
-any UI at all, it just tells `launchd` to restart the real busy-bee
-LaunchAgent and immediately exits. This split exists because launching
-*busy-bee itself* as a normal macOS app (Spotlight, Launchpad,
-double-click) is verified broken (see Known limitations) -- but a
-launcher that does nothing but run a `launchctl` command and quit
-never hits that problem, since it's the *target* process creating a
-status item that fails under Launch Services, not the launching one.
+Spotlight, Launchpad, or Finder (`/Applications`)** -- `install.sh`
+also builds this as a separate tiny app
+(`scripts/build_reopener_app.sh`). It's not the same app as busy-bee
+itself: it doesn't touch the menu bar or create any UI at all, it just
+tells `launchd` to restart the real busy-bee LaunchAgent and
+immediately exits. This split exists because launching *busy-bee
+itself* as a normal macOS app (Spotlight, Launchpad, double-click) is
+verified broken (see Known limitations) -- but a launcher that does
+nothing but run a `launchctl` command and quit never hits that
+problem, since it's the *target* process creating a status item that
+fails under Launch Services, not the launching one.
+
+**Don't pin "Open Busy Bee" to the Dock** -- busy-bee itself already
+has a Dock icon (with the same bee art and badge) whenever it's
+running, so pinning the reopener too just shows two icons for the same
+thing. If you already dragged it there, drag it back off, or right-
+click → Options → Remove from Dock.
 
 If the icon doesn't appear after either path, check what's actually
 running:
@@ -116,6 +123,13 @@ tail -20 /tmp/busybee-agent.log
 `bash scripts/install_launch_agent.sh` reinstalls and restarts the
 agent directly (equivalent to what "Open Busy Bee" does, but from a
 terminal).
+
+**If an app's icon looks wrong/generic/muted right after (re)building
+it, that's very likely a stale icon cache, not a bad icon file** --
+confirmed live: `iconutil -c iconset` on the actual built `.icns`
+showed the correct art even when the Dock was rendering something
+washed-out. `killall Dock` (safe, it relaunches instantly, no data
+loss) forces a re-render and usually fixes it immediately.
 
 ### 5. Log some status and watch it show up
 
