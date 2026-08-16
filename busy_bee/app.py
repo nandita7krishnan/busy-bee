@@ -167,6 +167,15 @@ def main() -> None:
         height=480,
         hidden=True,
     )
+
+    def _hide_instead_of_close():
+        window.hide()
+        return False  # cancels the actual close -- see should_close() in
+        # pywebview's cocoa backend: any False return from a `closing`
+        # handler prevents the native window from closing at all.
+
+    window.events.closing += _hide_instead_of_close
+
     app = BusyBeeApp(window)
 
     # pywebview requires the main thread for its blocking loop; this call

@@ -66,17 +66,20 @@ it before an agent has logged anything there.)
 
 `install.sh` installs and starts a `launchd` agent
 (`~/Library/LaunchAgents/dev.busybee.app.plist`) that runs `busy-bee`
-automatically: once now, again every time you log in, and again within
-5 seconds of it ever stopping for any reason (including using the tray
-menu's "Quit" -- see the note below). You should never need to
-manually launch this app.
+once automatically: now, and again every time you log in. It does
+*not* restart itself if you quit it -- quitting from the tray menu
+("Quit" -- rumps adds this automatically) actually quits, and it stays
+quit until you log in again or re-run `scripts/install_launch_agent.sh`.
 
 Look for the small 🐝 icon in your menu bar (top-right strip) --
 easy to miss among other menu bar icons, but it should be there within
 a few seconds of running the installer. Click it → "Show Dashboard" to
 open the popover. Click a project name inside a card to open a
 terminal and resume that project's Claude Code session (or focus the
-existing one, if it's already open -- see Architecture).
+existing one, if it's already open -- see Architecture). Clicking the
+popover window's red close button hides it rather than actually
+closing/destroying it, so "Show Dashboard" keeps working afterward --
+consistent with the rest of the app staying alive in the background.
 
 **Do not try to launch this as a normal macOS app** (Spotlight,
 Launchpad, double-clicking in `/Applications`) -- that path is
@@ -90,15 +93,7 @@ tail -20 /tmp/busybee-agent.log
 ```
 
 If it's not running, `bash scripts/install_launch_agent.sh` reinstalls
-and restarts the agent. To fully stop it (it won't come back until you
-load it again): `launchctl unload
-~/Library/LaunchAgents/dev.busybee.app.plist`.
-
-**Note on "Quit":** with `KeepAlive` set, quitting from the tray menu
-gets the process relaunched by launchd within ~5 seconds -- this is
-intentional (it's what makes the app always-available without you
-managing it), not a bug. Use `launchctl unload` above if you actually
-want it to stay stopped.
+and restarts the agent.
 
 ### 5. Log some status and watch it show up
 

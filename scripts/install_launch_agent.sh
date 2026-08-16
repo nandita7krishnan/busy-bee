@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Installs a launchd agent that starts busy-bee at login and restarts
-# it automatically whenever it's not running (including after using
-# the tray menu's Quit -- see README's Known limitations for why that
-# tradeoff is intentional here).
+# Installs a launchd agent that starts busy-bee once at login.
+# Deliberately no KeepAlive -- quitting from the tray menu should
+# actually quit it, not have it come back on its own. Re-run this
+# script (or log in again) to start it back up.
 #
 # This exists because launching busy-bee as a normal macOS .app
 # (double-click, Spotlight, Launchpad) reliably fails: Launch Services
@@ -33,10 +33,6 @@ cat > "$PLIST_PATH" <<PLIST
     </array>
     <key>RunAtLoad</key>
     <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>5</integer>
     <key>StandardOutPath</key>
     <string>/tmp/busybee-agent.log</string>
     <key>StandardErrorPath</key>
@@ -49,7 +45,6 @@ launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 
 echo "Installed and started the busy-bee LaunchAgent ($PLIST_PATH)."
-echo "It starts automatically at login and restarts itself if it ever"
-echo "stops -- look for the 🐝 in your menu bar now."
-echo "To fully stop it (it won't restart until you load it again):"
-echo "  launchctl unload \"$PLIST_PATH\""
+echo "It starts automatically at login -- look for the 🐝 in your menu"
+echo "bar now. Quit it from the tray menu any time; it stays quit until"
+echo "you log in again or re-run this script."
