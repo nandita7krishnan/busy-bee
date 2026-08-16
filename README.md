@@ -84,10 +84,13 @@ Dock with the same bee icon (busy_bee/icon.py renders it), and either
 one badges with a red circle + number whenever there's an unresolved
 blocker/question anywhere -- the Dock badge is macOS's native
 `NSDockTile.badgeLabel`; the menu bar one is hand-composited to match,
-since status items don't have an equivalent native badge API. Click
-the tray icon → "Show Dashboard" to open the popover. Click a project
-name inside a card to open a terminal and resume that project's Claude
-Code session (or focus the
+since status items don't have an equivalent native badge API. There's
+also a small floating widget -- same bee icon, always on top of other
+windows, draggable anywhere on screen (click-and-drag moves it, a
+plain click opens the dashboard, same as the tray menu). Click either
+the tray icon → "Show Dashboard", or the widget directly, to open the
+popover. Click a project name inside a card to open a terminal and
+resume that project's Claude Code session (or focus the
 existing one, if it's already open -- see Architecture). Clicking the
 popover window's red close button hides it rather than actually
 closing/destroying it, so "Show Dashboard" keeps working afterward --
@@ -220,7 +223,7 @@ busy_bee/
   icon.py                 renders the bee icon (menu bar + Dock, badge composited in)
   todo_sync.py             syncs Claude Code's TodoWrite list into dashctl
   global_setup.py           installs the CLAUDE.md snippet + Stop/PostToolUse hooks globally
-  ui/                        popover.html/css/js
+  ui/                        popover.html/css/js, widget.html/js (floating icon)
 hooks/
   stop_hook.py           Claude Code Stop hook (the safety net)
   todo_sync_hook.py      PostToolUse/TodoWrite hook -- calls busy_bee/todo_sync.py
@@ -311,6 +314,16 @@ tests/
   (`start_badge_timer`'s tick also spawns `_refresh_popover` on a
   background thread) instead of trusting a JS timer with no visibility
   into whether it's actually still running.
+- **Don't point an `<img src="file://...">` at a local file from
+  `popover.html`/`widget.html`.** Any bare filesystem path passed as a
+  window's `url` (not prefixed `file://`) is served over
+  `http://127.0.0.1` by pywebview's own local server, not loaded
+  directly -- so the *page* itself is `http://`, and WKWebView silently
+  blocks an `http://` page from loading `file://` resources. Confirmed
+  live: the widget's icon `<img>` had `naturalWidth`/`naturalHeight`
+  stuck at `0x0` despite the file genuinely existing at that path, no
+  console error. Use a `data:` URI instead (see
+  `Api.get_widget_icon_data_uri`) -- not subject to that restriction.
 
 ## Tests
 
