@@ -81,10 +81,6 @@ class Api:
             project["path"], cfg.get("terminal_app", "Terminal"), tty=project["terminal_tty"]
         )
 
-    def get_poll_interval_seconds(self) -> int:
-        return config.load_config().get("poll_interval_seconds", 5)
-
-
 class BusyBeeApp(rumps.App):
     def __init__(self, window: webview.Window):
         super().__init__("busy-bee", icon=str(icon.render_tray_icon(0)), menu=["Show Dashboard"])
@@ -113,8 +109,16 @@ class BusyBeeApp(rumps.App):
         AppKit.NSApp.dockTile().display()
 
     def start_badge_timer(self) -> None:
+        # Also drives the popover's periodic refresh (not just the
+        # badge) -- a JS-side setInterval was tried first and turned
+        # out unreliable in practice (confirmed live: the badge count,
+        # driven by this same rumps.Timer, kept updating correctly the
+        # whole time, while the popover's own timer silently stopped
+        # refreshing). Piggybacking on this already-proven-reliable
+        # Python-side timer instead of debugging an opaque JS one.
         def tick(_timer):
             self.refresh_badge()
+            threading.Thread(target=self._refresh_popover, daemon=True).start()
 
         rumps.Timer(tick, 5).start()
 

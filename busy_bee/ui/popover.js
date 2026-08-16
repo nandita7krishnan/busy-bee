@@ -120,14 +120,11 @@ async function loadProjects() {
   render(projects);
 }
 
-async function startAutoRefresh() {
-  await loadProjects();
-  // Matches the aggregator's own poll interval (fetched, not
-  // hardcoded, so changing poll_interval_seconds in config.json can't
-  // make this drift out of sync with it) -- otherwise this window
-  // just sitting open would silently go stale between clicks.
-  const intervalSeconds = await window.pywebview.api.get_poll_interval_seconds();
-  setInterval(loadProjects, intervalSeconds * 1000);
-}
-
-window.addEventListener("pywebviewready", startAutoRefresh);
+// Periodic refresh is driven from the Python side (BusyBeeApp's
+// rumps.Timer calls window.evaluate_js("window.loadProjects()") every
+// 5s) rather than a JS-side setInterval here -- that was tried first
+// and turned out unreliable in practice (confirmed live: the tray
+// badge, driven by that same Python timer, kept updating correctly
+// the whole time a JS setInterval sat silently stalled). This only
+// needs to handle the initial load.
+window.addEventListener("pywebviewready", loadProjects);
