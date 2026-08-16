@@ -10,11 +10,16 @@ auto-registers itself the first time any command below runs.
 Log status as you work, using one-line, plain-language descriptions:
 
 - Finished a task: `dashctl done "<what you finished>"`
-- Identified upcoming work: `dashctl todo "<what's next>"`
+- Identified upcoming work: `dashctl todo "<what's next>"` (note its
+  id -- once you actually do it, resolve it, see below)
 - Can't proceed without the user: `dashctl blocker "<what's blocking you>"`
 - Need a decision from the user: `dashctl question "<the question>"`
-- A blocker or question got resolved: `dashctl resolve blocker <id>` or
-  `dashctl resolve question <id>` (the id is printed when it was logged)
+- A blocker, question, or todo you logged manually is done: `dashctl
+  resolve blocker|question|todo <id>` (the id is printed when it was
+  logged). Without this, a manually-logged todo just sits there
+  forever instead of clearing -- don't forget it once the work is
+  actually done. (Items synced from TodoWrite don't need this --
+  that's handled automatically.)
 - Wrapping up a chunk of work, or a session is ending: `dashctl summary
   "<one sentence on where things stand>"`. This is different from the
   above -- it doesn't add to a growing list, it's a single line shown

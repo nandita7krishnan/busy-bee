@@ -64,8 +64,8 @@ def add_item(project_root: Path, item_type: ItemType, text: str, source: str = "
 
 
 def resolve_item(project_root: Path, item_type: ItemType, item_id: str) -> bool:
-    if item_type not in ("blocker", "question"):
-        raise ValueError("only blocker or question items can be resolved")
+    if item_type not in ("blocker", "question", "todo"):
+        raise ValueError("only blocker, question, or todo items can be resolved")
     items = _load(project_root)
     for item in items:
         if item["id"] == item_id and item["type"] == item_type:

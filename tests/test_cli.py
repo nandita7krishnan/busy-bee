@@ -19,10 +19,21 @@ def test_done_and_todo_logged(tmp_path, monkeypatch, capsys):
     assert cli.main(["todo", "write docs"]) == 0
     out = capsys.readouterr().out
     assert "logged done: shipped it" in out
-    assert "logged todo: write docs" in out
+    assert "logged todo [" in out and "]: write docs" in out
 
     status_file = tmp_path / ".claude-dashboard" / "status.json"
     assert status_file.exists()
+
+
+def test_todo_then_resolve(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    cli.main(["todo", "write docs"])
+    out = capsys.readouterr().out
+    item_id = out.split("[")[1].split("]")[0]
+
+    assert cli.main(["resolve", "todo", item_id]) == 0
+    out = capsys.readouterr().out
+    assert f"resolved todo [{item_id}]" in out
 
 
 def test_summary_logged_without_id(tmp_path, monkeypatch, capsys):

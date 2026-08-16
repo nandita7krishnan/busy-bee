@@ -46,13 +46,22 @@ def test_resolve_unknown_item_returns_false(tmp_path):
     assert project_store.resolve_item(tmp_path, "blocker", "does-not-exist") is False
 
 
-def test_resolve_rejects_done_or_todo(tmp_path):
+def test_resolve_rejects_done_or_summary(tmp_path):
     item = project_store.add_item(tmp_path, "done", "x")
     try:
         project_store.resolve_item(tmp_path, "done", item["id"])
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_resolve_accepts_todo(tmp_path):
+    item = project_store.add_item(tmp_path, "todo", "write tests")
+    assert project_store.resolve_item(tmp_path, "todo", item["id"]) is True
+
+    items = project_store.all_items(tmp_path)
+    resolved = next(i for i in items if i["id"] == item["id"])
+    assert resolved["resolved_at"] is not None
 
 
 def test_has_logged_this_turn(tmp_path):

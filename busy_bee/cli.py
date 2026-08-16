@@ -5,7 +5,7 @@
     dashctl blocker "<text>"
     dashctl question "<text>"
     dashctl summary "<text>"
-    dashctl resolve blocker|question <id>
+    dashctl resolve blocker|question|todo <id>
 
 `summary` is different from the rest: it's not shown in the Done/Next
 lists, just as a short line next to the project name in the dashboard
@@ -69,7 +69,7 @@ def cmd_log(item_type: str, text: str) -> int:
     root = _project_root()
     _auto_register(root)
     item = project_store.add_item(root, item_type, text)  # type: ignore[arg-type]
-    if item_type in ("blocker", "question"):
+    if item_type in ("blocker", "question", "todo"):
         print(f"logged {item_type} [{item['id']}]: {text}")
     else:
         print(f"logged {item_type}: {text}")
@@ -105,8 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(item_type, help=f"log a {item_type} item")
         p.add_argument("text", help="one-line description")
 
-    resolve_p = sub.add_parser("resolve", help="resolve a blocker or question")
-    resolve_p.add_argument("type", choices=["blocker", "question"])
+    resolve_p = sub.add_parser("resolve", help="resolve a blocker, question, or todo")
+    resolve_p.add_argument("type", choices=["blocker", "question", "todo"])
     resolve_p.add_argument("id", help="item id printed when it was logged")
 
     init_p = sub.add_parser(
