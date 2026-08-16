@@ -48,6 +48,7 @@ mkdir -p "$HOME/.claude-dashboard"
 "$VENV_DIR/bin/dashctl" setup-global
 
 bash "$REPO_DIR/scripts/install_launch_agent.sh"
+bash "$REPO_DIR/scripts/build_reopener_app.sh"
 
 echo
 echo "Installed dashctl and busy-bee into $BIN_DIR."
@@ -56,7 +57,9 @@ if [ "${NEEDS_PATH_WARNING:-0}" = "1" ]; then
     echo "~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\") or dashctl won't"
     echo "be found from new terminals."
 fi
-echo "busy-bee is now running (LaunchAgent, starts at login, restarts"
-echo "itself automatically) -- look for the 🐝 in your menu bar."
+echo "busy-bee is now running (LaunchAgent, starts at login only) --"
+echo "look for the 🐝 in your menu bar. If you ever quit it, reopen it"
+echo "from Spotlight/Launchpad/Dock as \"Open Busy Bee\" -- no terminal"
+echo "needed."
 echo "Any project you work in from now on will register itself the"
 echo "first time an agent logs status -- no per-project setup needed."

@@ -62,14 +62,14 @@ directly to run `dashctl`, or start a fresh session in that project.
 project under a name other than its directory's basename, or register
 it before an agent has logged anything there.)
 
-### 4. Nothing to launch -- it's already running
+### 4. It's already running; here's how to reopen or quit it
 
 `install.sh` installs and starts a `launchd` agent
 (`~/Library/LaunchAgents/dev.busybee.app.plist`) that runs `busy-bee`
 once automatically: now, and again every time you log in. It does
 *not* restart itself if you quit it -- quitting from the tray menu
 ("Quit" -- rumps adds this automatically) actually quits, and it stays
-quit until you log in again or re-run `scripts/install_launch_agent.sh`.
+quit until you bring it back.
 
 Look for the small 🐝 icon in your menu bar (top-right strip) --
 easy to miss among other menu bar icons, but it should be there within
@@ -81,19 +81,29 @@ popover window's red close button hides it rather than actually
 closing/destroying it, so "Show Dashboard" keeps working afterward --
 consistent with the rest of the app staying alive in the background.
 
-**Do not try to launch this as a normal macOS app** (Spotlight,
-Launchpad, double-clicking in `/Applications`) -- that path is
-verified broken (see Known limitations) and there's no packaged `.app`
-to find that way; the LaunchAgent above is the only supported way to
-run it. If the icon doesn't appear, check it's actually running:
+**If you quit it and want it back, launch "Open Busy Bee" from
+Spotlight, Launchpad, or the Dock** -- `install.sh` also builds this
+as a separate tiny app (`scripts/build_reopener_app.sh`). It's not the
+same app as busy-bee itself: it doesn't touch the menu bar or create
+any UI at all, it just tells `launchd` to restart the real busy-bee
+LaunchAgent and immediately exits. This split exists because launching
+*busy-bee itself* as a normal macOS app (Spotlight, Launchpad,
+double-click) is verified broken (see Known limitations) -- but a
+launcher that does nothing but run a `launchctl` command and quit
+never hits that problem, since it's the *target* process creating a
+status item that fails under Launch Services, not the launching one.
+
+If the icon doesn't appear after either path, check what's actually
+running:
 
 ```
 ps aux | grep busy-bee
 tail -20 /tmp/busybee-agent.log
 ```
 
-If it's not running, `bash scripts/install_launch_agent.sh` reinstalls
-and restarts the agent.
+`bash scripts/install_launch_agent.sh` reinstalls and restarts the
+agent directly (equivalent to what "Open Busy Bee" does, but from a
+terminal).
 
 ### 5. Log some status and watch it show up
 
@@ -172,6 +182,7 @@ claude_md_snippet.md   installed into ~/.claude/CLAUDE.md by setup-global
 scripts/
   install.sh                full install
   install_launch_agent.sh   installs/starts the launchd agent that runs the app
+  build_reopener_app.sh     builds "Open Busy Bee.app" -- restarts the agent via GUI
 tests/
 ```
 
@@ -208,7 +219,11 @@ tests/
   problems by not being a Launch-Services "app" launch at all. A
   proper `py2app` build (private embedded Python framework, no foreign
   bundle to get misattributed to) might make a real double-clickable
-  `.app` viable again, but hasn't been tried.
+  `.app` viable again, but hasn't been tried. Workaround in place:
+  "Open Busy Bee.app" (`scripts/build_reopener_app.sh`) is a separate,
+  GUI-launchable app that never creates a status item itself -- it
+  only runs `launchctl kickstart` on the real LaunchAgent and exits --
+  so its own Launch-Services launch never hits this bug.
 - Clicking the tray icon shows a one-item menu ("Show Dashboard")
   rather than opening the popover directly on click -- `rumps` doesn't
   expose binding an arbitrary handler straight to the status item
