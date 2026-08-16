@@ -141,8 +141,14 @@ dashctl todo "<what's next>"
 dashctl blocker "<what's blocking progress>"
 dashctl question "<what needs a decision from you>"
 dashctl summary "<one sentence on where things stand>"
-dashctl resolve blocker|question <id>
+dashctl resolve blocker|question|todo <id>
 ```
+
+A manually-logged `todo` (as opposed to one synced from `TodoWrite`,
+which clears itself automatically) has no way to disappear from "Next"
+except `resolve` or getting pushed out by 3 newer todos -- forgetting
+this was a real bug hit live (a card's "Next" column showed hours-old
+stale items because nothing had ever resolved or superseded them).
 
 `summary` is different from the rest: it's a single line shown next to
 the project name in its card, not a growing list -- each new one
