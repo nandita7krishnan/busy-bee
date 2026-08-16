@@ -63,6 +63,7 @@ class Api:
                     "name": p["name"],
                     "path": p["path"],
                     "status": p["status"],
+                    "summary": p["last_summary"],
                     "done": done,
                     "todo": todo,
                     "blockers": blockers,

@@ -63,11 +63,18 @@ function renderCard(project) {
       </div>`
     : "";
 
+  const summaryHtml = project.summary
+    ? `<span class="summary-text" title="${escapeHtml(project.summary)}">${escapeHtml(project.summary)}</span>`
+    : "";
+
   return `
     <div class="card ${colorClass} ${expanded ? "expanded" : ""}" data-project="${escapeHtml(project.name)}">
       <div class="card-header" data-toggle>
         <span class="chevron">&#9656;</span>
-        <span class="project-name" data-open-terminal>${escapeHtml(project.name)}</span>
+        <div class="title-row" data-open-terminal>
+          <span class="project-name">${escapeHtml(project.name)}</span>
+          ${summaryHtml}
+        </div>
         ${badges}
       </div>
       <div class="card-body">

@@ -93,13 +93,31 @@ body {
   gap: 6px;
 }
 
-.project-name {
-  font-weight: 600;
+.title-row {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   cursor: pointer;
 }
 
-.project-name:hover { text-decoration: underline; }
+.title-row:hover .project-name { text-decoration: underline; }
+
+.project-name {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
 
 .badge {
   display: inline-flex;

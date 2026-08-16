@@ -92,3 +92,32 @@ def test_install_stop_hook_is_idempotent():
 
     settings = json.loads(global_setup.SETTINGS_PATH.read_text())
     assert len(settings["hooks"]["Stop"]) == 1
+
+
+def test_install_todo_sync_hook_sets_matcher():
+    result = global_setup.install_todo_sync_hook(python_path="python3")
+    assert "added" in result
+
+    settings = json.loads(global_setup.SETTINGS_PATH.read_text())
+    entries = settings["hooks"]["PostToolUse"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "TodoWrite"
+    assert "todo_sync_hook.py" in entries[0]["hooks"][0]["command"]
+
+
+def test_install_todo_sync_hook_is_idempotent():
+    global_setup.install_todo_sync_hook(python_path="python3")
+    result = global_setup.install_todo_sync_hook(python_path="python3")
+    assert "already present" in result
+
+    settings = json.loads(global_setup.SETTINGS_PATH.read_text())
+    assert len(settings["hooks"]["PostToolUse"]) == 1
+
+
+def test_stop_hook_and_todo_sync_hook_coexist():
+    global_setup.install_stop_hook(python_path="python3")
+    global_setup.install_todo_sync_hook(python_path="python3")
+
+    settings = json.loads(global_setup.SETTINGS_PATH.read_text())
+    assert "stop_hook.py" in settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+    assert "todo_sync_hook.py" in settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]

@@ -20,7 +20,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY,
   project TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('done','todo','blocker','question')),
+  type TEXT NOT NULL CHECK (type IN ('done','todo','blocker','question','summary')),
   text TEXT NOT NULL,
   created_at TIMESTAMP NOT NULL,
   resolved_at TIMESTAMP,
@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS projects (
   path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'idle',
   last_seen_at TIMESTAMP,
-  terminal_tty TEXT
+  terminal_tty TEXT,
+  last_summary TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_project_type ON items(project, type);
@@ -61,6 +62,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
     if "terminal_tty" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN terminal_tty TEXT")
+    if "last_summary" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN last_summary TEXT")
+
+    # SQLite can't ALTER a CHECK constraint in place -- rebuild items
+    # if the table predates 'summary' being a valid type, preserving
+    # every row.
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='items'").fetchone()
+    if row is not None and "'summary'" not in row["sql"]:
+        conn.execute("ALTER TABLE items RENAME TO items_old")
+        conn.executescript(SCHEMA)
+        conn.execute(
+            "INSERT INTO items (id, project, type, text, created_at, resolved_at, source, source_id) "
+            "SELECT id, project, type, text, created_at, resolved_at, source, source_id FROM items_old"
+        )
+        conn.execute("DROP TABLE items_old")
 
 
 def init_db() -> None:
@@ -70,21 +86,40 @@ def init_db() -> None:
 
 
 def upsert_project(
-    name: str, path: str, status: str | None = None, terminal_tty: str | None = None
+    name: str,
+    path: str,
+    status: str | None = None,
+    terminal_tty: str | None = None,
+    last_summary: str | None = None,
 ) -> None:
     with connect() as conn:
         row = conn.execute("SELECT status FROM projects WHERE name = ?", (name,)).fetchone()
         if row is None:
             conn.execute(
-                "INSERT INTO projects (name, path, status, last_seen_at, terminal_tty) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (name, path, status or "idle", datetime.now(timezone.utc).isoformat(), terminal_tty),
+                "INSERT INTO projects (name, path, status, last_seen_at, terminal_tty, last_summary) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    name,
+                    path,
+                    status or "idle",
+                    datetime.now(timezone.utc).isoformat(),
+                    terminal_tty,
+                    last_summary,
+                ),
             )
         else:
             conn.execute(
                 "UPDATE projects SET path = ?, status = COALESCE(?, status), last_seen_at = ?, "
-                "terminal_tty = COALESCE(?, terminal_tty) WHERE name = ?",
-                (path, status, datetime.now(timezone.utc).isoformat(), terminal_tty, name),
+                "terminal_tty = COALESCE(?, terminal_tty), last_summary = COALESCE(?, last_summary) "
+                "WHERE name = ?",
+                (
+                    path,
+                    status,
+                    datetime.now(timezone.utc).isoformat(),
+                    terminal_tty,
+                    last_summary,
+                    name,
+                ),
             )
 
 

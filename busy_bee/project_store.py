@@ -16,8 +16,8 @@ from typing import Literal
 
 from busy_bee import process_utils
 
-ItemType = Literal["done", "todo", "blocker", "question"]
-VALID_TYPES: tuple[ItemType, ...] = ("done", "todo", "blocker", "question")
+ItemType = Literal["done", "todo", "blocker", "question", "summary"]
+VALID_TYPES: tuple[ItemType, ...] = ("done", "todo", "blocker", "question", "summary")
 
 
 def _now() -> str:
@@ -87,6 +87,14 @@ def latest_terminal_tty(items: list[dict]) -> str | None:
     if not with_tty:
         return None
     return max(with_tty, key=lambda i: i["created_at"])["terminal_tty"]
+
+
+def latest_summary(items: list[dict]) -> str | None:
+    """The text of the most recently logged `summary` item, if any."""
+    summaries = [i for i in items if i["type"] == "summary"]
+    if not summaries:
+        return None
+    return max(summaries, key=lambda i: i["created_at"])["text"]
 
 
 def has_logged_this_turn(project_root: Path, since_seconds: int = 120) -> bool:

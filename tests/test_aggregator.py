@@ -74,6 +74,17 @@ def test_sync_project_propagates_terminal_tty(tmp_path, monkeypatch):
     assert project["terminal_tty"] == "ttys002"
 
 
+def test_sync_project_propagates_last_summary(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_store.add_item(project_dir, "summary", "auth flow mostly done")
+
+    aggregator.sync_project("proj", str(project_dir))
+
+    project = db.get_project("proj")
+    assert project["last_summary"] == "auth flow mostly done"
+
+
 def test_sync_all_uses_config(tmp_path, monkeypatch):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()

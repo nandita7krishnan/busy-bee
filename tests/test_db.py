@@ -87,3 +87,72 @@ def test_upsert_project_preserves_status_when_none_passed():
     db.upsert_project("p1", "/tmp/p1")
     project = db.get_project("p1")
     assert project["status"] == "blocked"
+
+
+def test_upsert_project_sets_and_preserves_last_summary():
+    db.upsert_project("p1", "/tmp/p1", last_summary="first summary")
+    project = db.get_project("p1")
+    assert project["last_summary"] == "first summary"
+
+    db.upsert_project("p1", "/tmp/p1")  # no summary passed -- should keep it
+    project = db.get_project("p1")
+    assert project["last_summary"] == "first summary"
+
+    db.upsert_project("p1", "/tmp/p1", last_summary="updated summary")
+    project = db.get_project("p1")
+    assert project["last_summary"] == "updated summary"
+
+
+def test_items_accept_summary_type():
+    db.upsert_item("p1", "summary", "where things stand", "2026-08-14T10:00:00+00:00", None, "agent", "s1")
+    # would raise sqlite3.IntegrityError against the old CHECK constraint if migration failed
+    rows = db.get_unresolved("p1", "summary")
+    assert [r["text"] for r in rows] == ["where things stand"]
+
+
+def test_migrate_rebuilds_items_table_preserving_rows_and_allowing_summary(tmp_path, monkeypatch):
+    import sqlite3
+
+    old_db_path = tmp_path / "old.sqlite"
+    monkeypatch.setattr(config, "DB_PATH", old_db_path)
+
+    # Simulate a pre-'summary' database (old CHECK constraint, no
+    # last_summary column) to prove the migration handles real
+    # upgrades, not just fresh installs.
+    conn = sqlite3.connect(old_db_path)
+    conn.executescript(
+        """
+        CREATE TABLE items (
+          id INTEGER PRIMARY KEY,
+          project TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('done','todo','blocker','question')),
+          text TEXT NOT NULL,
+          created_at TIMESTAMP NOT NULL,
+          resolved_at TIMESTAMP,
+          source TEXT NOT NULL DEFAULT 'agent',
+          source_id TEXT,
+          UNIQUE(project, source_id)
+        );
+        CREATE TABLE projects (
+          name TEXT PRIMARY KEY,
+          path TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'idle',
+          last_seen_at TIMESTAMP,
+          terminal_tty TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO items (project, type, text, created_at, source, source_id) "
+        "VALUES ('p1', 'done', 'pre-migration item', '2026-08-14T10:00:00+00:00', 'agent', 'old1')"
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+
+    rows = db.get_recent_done("p1")
+    assert [r["text"] for r in rows] == ["pre-migration item"]
+
+    db.upsert_item("p1", "summary", "now works", "2026-08-14T11:00:00+00:00", None, "agent", "new1")
+    assert [r["text"] for r in db.get_unresolved("p1", "summary")] == ["now works"]

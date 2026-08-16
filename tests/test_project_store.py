@@ -89,3 +89,22 @@ def test_latest_terminal_tty_picks_most_recent():
 def test_latest_terminal_tty_returns_none_when_none_recorded():
     items = [{"created_at": "2026-08-14T10:00:00+00:00", "terminal_tty": None}]
     assert project_store.latest_terminal_tty(items) is None
+
+
+def test_add_item_accepts_summary_type(tmp_path):
+    item = project_store.add_item(tmp_path, "summary", "shipped the login flow")
+    assert item["type"] == "summary"
+
+
+def test_latest_summary_picks_most_recent():
+    items = [
+        {"type": "summary", "created_at": "2026-08-14T10:00:00+00:00", "text": "old summary"},
+        {"type": "done", "created_at": "2026-08-14T11:00:00+00:00", "text": "not a summary"},
+        {"type": "summary", "created_at": "2026-08-14T12:00:00+00:00", "text": "new summary"},
+    ]
+    assert project_store.latest_summary(items) == "new summary"
+
+
+def test_latest_summary_returns_none_when_absent():
+    items = [{"type": "done", "created_at": "2026-08-14T10:00:00+00:00", "text": "x"}]
+    assert project_store.latest_summary(items) is None

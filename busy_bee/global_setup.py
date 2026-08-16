@@ -25,6 +25,7 @@ SETTINGS_PATH = CLAUDE_DIR / "settings.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SNIPPET_PATH = REPO_ROOT / "claude_md_snippet.md"
 STOP_HOOK_PATH = REPO_ROOT / "hooks" / "stop_hook.py"
+TODO_SYNC_HOOK_PATH = REPO_ROOT / "hooks" / "todo_sync_hook.py"
 
 MARKER_START = "<!-- busy-bee:start -->"
 MARKER_END = "<!-- busy-bee:end -->"
@@ -48,30 +49,43 @@ def install_claude_md_snippet() -> str:
     return f"appended to {CLAUDE_MD_PATH}"
 
 
-def install_stop_hook(python_path: str = "python3") -> str:
-    command = f"{python_path} {STOP_HOOK_PATH}"
-
+def _install_hook(event: str, command: str, matcher: str | None = None) -> str:
     settings: dict = {}
     if SETTINGS_PATH.exists():
         settings = json.loads(SETTINGS_PATH.read_text())
 
     hooks = settings.setdefault("hooks", {})
-    stop_hooks = hooks.setdefault("Stop", [])
+    event_hooks = hooks.setdefault(event, [])
 
-    for entry in stop_hooks:
+    for entry in event_hooks:
         for h in entry.get("hooks", []):
             if h.get("command") == command:
                 return f"already present in {SETTINGS_PATH}"
 
-    stop_hooks.append({"hooks": [{"type": "command", "command": command}]})
+    entry = {"hooks": [{"type": "command", "command": command}]}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    event_hooks.append(entry)
+
     CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
     return f"added to {SETTINGS_PATH}"
 
 
+def install_stop_hook(python_path: str = "python3") -> str:
+    return _install_hook("Stop", f"{python_path} {STOP_HOOK_PATH}")
+
+
+def install_todo_sync_hook(python_path: str = "python3") -> str:
+    return _install_hook(
+        "PostToolUse", f"{python_path} {TODO_SYNC_HOOK_PATH}", matcher="TodoWrite"
+    )
+
+
 def main() -> int:
     print(f"CLAUDE.md snippet: {install_claude_md_snippet()}")
     print(f"Stop hook: {install_stop_hook()}")
+    print(f"TodoWrite sync hook: {install_todo_sync_hook()}")
     print()
     print("Every Claude Code session on this machine will now log status to")
     print("busy-bee, and dashctl auto-registers a project the first time it")

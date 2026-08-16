@@ -25,6 +25,14 @@ def test_done_and_todo_logged(tmp_path, monkeypatch, capsys):
     assert status_file.exists()
 
 
+def test_summary_logged_without_id(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["summary", "auth flow mostly done, tests pending"]) == 0
+    out = capsys.readouterr().out
+    assert "logged summary: auth flow mostly done, tests pending" in out
+    assert "[" not in out  # no id printed, unlike blocker/question
+
+
 def test_log_auto_registers_project_without_init(tmp_path, monkeypatch):
     project_dir = tmp_path / "auto-proj"
     project_dir.mkdir()

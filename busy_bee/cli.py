@@ -4,7 +4,14 @@
     dashctl todo "<text>"
     dashctl blocker "<text>"
     dashctl question "<text>"
+    dashctl summary "<text>"
     dashctl resolve blocker|question <id>
+
+`summary` is different from the rest: it's not shown in the Done/Next
+lists, just as a short line next to the project name in the dashboard
+-- one per project, overwritten each time (not a growing history). Use
+it when wrapping up a chunk of work or a session, to capture "where
+things stand" in a sentence.
 
 The current directory is auto-registered as a tracked project the
 first time any of the log commands runs -- no separate init step
@@ -55,6 +62,9 @@ def _auto_register(root: Path) -> None:
         config.add_project(root.name, str(root))
 
 
+_LOG_TYPES = ("done", "todo", "blocker", "question", "summary")
+
+
 def cmd_log(item_type: str, text: str) -> int:
     root = _project_root()
     _auto_register(root)
@@ -91,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dashctl", description="Log status for busy-bee.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    for item_type in ("done", "todo", "blocker", "question"):
+    for item_type in _LOG_TYPES:
         p = sub.add_parser(item_type, help=f"log a {item_type} item")
         p.add_argument("text", help="one-line description")
 
@@ -116,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command in ("done", "todo", "blocker", "question"):
+    if args.command in _LOG_TYPES:
         return cmd_log(args.command, args.text)
     if args.command == "resolve":
         return cmd_resolve(args.type, args.id)

@@ -15,6 +15,14 @@ Log status as you work, using one-line, plain-language descriptions:
 - Need a decision from the user: `dashctl question "<the question>"`
 - A blocker or question got resolved: `dashctl resolve blocker <id>` or
   `dashctl resolve question <id>` (the id is printed when it was logged)
+- Wrapping up a chunk of work, or a session is ending: `dashctl summary
+  "<one sentence on where things stand>"`. This is different from the
+  above -- it doesn't add to a growing list, it's a single line shown
+  next to the project name, overwritten each time. Keep it very short.
+
+If the TodoWrite tool is available and used, its list is synced into
+dashctl automatically via a hook -- no need to separately call
+`dashctl todo` for the same items already tracked there.
 
 Log at least one item before ending a turn -- a `done` if you finished
 something, a `todo` if you're mid-task, or a `blocker`/`question` if
