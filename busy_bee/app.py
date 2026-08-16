@@ -29,6 +29,7 @@ equivalent, one extra click.
 
 from __future__ import annotations
 
+import base64
 import threading
 import time
 
@@ -42,7 +43,14 @@ UI_DIR = __file__.rsplit("/", 1)[0] + "/ui"
 
 
 class Api:
-    """Exposed to the popover's JS as `window.pywebview.api`."""
+    """Exposed to both the popover's and the floating widget's JS as
+    `window.pywebview.api`. `popover_window` is set right after
+    creation in main() -- Api needs to exist before the window does
+    (it's passed as the window's js_api), so it can't be a constructor
+    argument."""
+
+    def __init__(self) -> None:
+        self.popover_window: webview.Window | None = None
 
     def get_projects(self) -> list[dict]:
         projects = db.get_projects()
@@ -81,23 +89,50 @@ class Api:
             project["path"], cfg.get("terminal_app", "Terminal"), tty=project["terminal_tty"]
         )
 
+    def open_dashboard(self) -> None:
+        """Shows the popover and refreshes its content. Called by the
+        floating widget's click handler, and by the tray menu's "Show
+        Dashboard" (BusyBeeApp.show_dashboard delegates here so both
+        entry points share one code path)."""
+        if self.popover_window is None:
+            return
+        self.popover_window.show()
+        threading.Thread(target=self.refresh_popover_content, daemon=True).start()
+
+    def refresh_popover_content(self) -> None:
+        # evaluate_js() blocks its calling thread waiting on a semaphore
+        # released from the main thread's run loop; if called from the
+        # main thread (e.g. a rumps.clicked callback, which already
+        # runs there) that's the thread waiting on itself -- a
+        # deadlock, not just slowness. Always call this from a
+        # throwaway background thread.
+        if self.popover_window is not None:
+            self.popover_window.evaluate_js("window.loadProjects && window.loadProjects()")
+
+    def get_widget_icon_data_uri(self) -> str:
+        # A data: URI, not a file path -- widget.html is served over
+        # http://127.0.0.1 by pywebview's local server (any bare
+        # filesystem path passed as a window's url goes through that,
+        # not file://), and WKWebView silently blocks an http:// page
+        # from loading a file:// resource. Confirmed live: the <img>
+        # naturalWidth/Height stayed 0x0 with a file:// src despite the
+        # file genuinely existing. data: URIs aren't subject to that
+        # origin restriction.
+        count = db.count_all_unresolved_blockers_and_questions()
+        path = icon.render_tray_icon(count)
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+
+
 class BusyBeeApp(rumps.App):
-    def __init__(self, window: webview.Window):
+    def __init__(self, api: Api, widget_window: webview.Window):
         super().__init__("busy-bee", icon=str(icon.render_tray_icon(0)), menu=["Show Dashboard"])
-        self.window = window
+        self.api = api
+        self.widget_window = widget_window
 
     @rumps.clicked("Show Dashboard")
     def show_dashboard(self, _sender) -> None:
-        self.window.show()
-        # evaluate_js() blocks its calling thread waiting on a semaphore
-        # released from the main thread's run loop; since rumps.clicked
-        # callbacks fire *on* the main thread, calling it here directly
-        # would deadlock (main thread waits on itself). Run it from a
-        # throwaway thread instead.
-        threading.Thread(target=self._refresh_popover, daemon=True).start()
-
-    def _refresh_popover(self) -> None:
-        self.window.evaluate_js("window.loadProjects && window.loadProjects()")
+        self.api.open_dashboard()
 
     def refresh_badge(self) -> None:
         count = db.count_all_unresolved_blockers_and_questions()
@@ -108,17 +143,22 @@ class BusyBeeApp(rumps.App):
         AppKit.NSApp.dockTile().setBadgeLabel_(str(count) if count else None)
         AppKit.NSApp.dockTile().display()
 
+    def _refresh_widget_icon(self) -> None:
+        self.widget_window.evaluate_js("window.refreshIcon && window.refreshIcon()")
+
     def start_badge_timer(self) -> None:
-        # Also drives the popover's periodic refresh (not just the
-        # badge) -- a JS-side setInterval was tried first and turned
-        # out unreliable in practice (confirmed live: the badge count,
-        # driven by this same rumps.Timer, kept updating correctly the
-        # whole time, while the popover's own timer silently stopped
-        # refreshing). Piggybacking on this already-proven-reliable
-        # Python-side timer instead of debugging an opaque JS one.
+        # Also drives the popover's and widget's periodic refresh, not
+        # just the badge -- a JS-side setInterval was tried first for
+        # the popover and turned out unreliable in practice (confirmed
+        # live: the badge count, driven by this same rumps.Timer, kept
+        # updating correctly the whole time, while the popover's own
+        # timer silently stopped refreshing). Piggybacking on this
+        # already-proven-reliable Python-side timer instead of
+        # trusting another opaque JS one for the widget too.
         def tick(_timer):
             self.refresh_badge()
-            threading.Thread(target=self._refresh_popover, daemon=True).start()
+            threading.Thread(target=self.api.refresh_popover_content, daemon=True).start()
+            threading.Thread(target=self._refresh_widget_icon, daemon=True).start()
 
         rumps.Timer(tick, 5).start()
 
@@ -176,27 +216,58 @@ def _on_webview_loop_started(app: BusyBeeApp) -> None:
     AppHelper.callAfter(_start_rumps_setup_without_blocking, app)
 
 
+WIDGET_SIZE = 56
+
+
 def main() -> None:
     db.init_db()
 
-    window = webview.create_window(
+    api = Api()
+
+    # Must be windows[0] (the first window created): webview.start()
+    # blocks the main thread on this one specifically, and waits for
+    # its `shown` event (fired regardless of `hidden`) before creating
+    # any additional windows -- so this has to come before the widget.
+    popover_window = webview.create_window(
         "busy-bee",
         url=f"{UI_DIR}/popover.html",
-        js_api=Api(),
+        js_api=api,
         width=480,
         height=620,
         hidden=True,
     )
+    api.popover_window = popover_window
 
     def _hide_instead_of_close():
-        window.hide()
+        popover_window.hide()
         return False  # cancels the actual close -- see should_close() in
         # pywebview's cocoa backend: any False return from a `closing`
         # handler prevents the native window from closing at all.
 
-    window.events.closing += _hide_instead_of_close
+    popover_window.events.closing += _hide_instead_of_close
 
-    app = BusyBeeApp(window)
+    # The floating widget: a small always-on-top, frameless, transparent
+    # window showing just the bee icon (same art + badge as the tray
+    # icon). Draggable via easy_drag (native cocoa mouseDown/mouseDragged
+    # handling -- a plain click still reaches the page's JS click
+    # handler normally; only an actual drag moves the window). Visible
+    # by default, unlike the popover -- the whole point is an
+    # always-there click target.
+    widget_window = webview.create_window(
+        "busy-bee-widget",
+        url=f"{UI_DIR}/widget.html",
+        js_api=api,
+        width=WIDGET_SIZE,
+        height=WIDGET_SIZE,
+        frameless=True,
+        easy_drag=True,
+        on_top=True,
+        transparent=True,
+        resizable=False,
+        hidden=False,
+    )
+
+    app = BusyBeeApp(api, widget_window)
 
     # pywebview requires the main thread for its blocking loop; this call
     # doesn't return until the app quits.
