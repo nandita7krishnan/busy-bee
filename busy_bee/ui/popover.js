@@ -15,8 +15,14 @@ function projectColorClass(name) {
 }
 
 function renderColumn(title, items, className, emptyLabel) {
+  const check = className === "done" ? "✓" : "▢"; // ✓ / ▢
   const listItems = items.length
-    ? items.map((text) => `<li>${escapeHtml(text)}</li>`).join("")
+    ? items
+        .map((text) => {
+          const safe = escapeHtml(text);
+          return `<li><span class="check">${check}</span><span class="item-text" title="${safe}">${safe}</span></li>`;
+        })
+        .join("")
     : `<li class="empty-column">${emptyLabel}</li>`;
   return `<div class="column ${className}"><h4>${title}</h4><ul>${listItems}</ul></div>`;
 }

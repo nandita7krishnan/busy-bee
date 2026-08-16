@@ -163,8 +163,8 @@ def main() -> None:
         "busy-bee",
         url=f"{UI_DIR}/popover.html",
         js_api=Api(),
-        width=360,
-        height=480,
+        width=480,
+        height=620,
         hidden=True,
     )
 
