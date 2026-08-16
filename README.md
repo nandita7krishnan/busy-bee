@@ -140,8 +140,18 @@ dashctl done "<what got finished>"
 dashctl todo "<what's next>"
 dashctl blocker "<what's blocking progress>"
 dashctl question "<what needs a decision from you>"
+dashctl summary "<one sentence on where things stand>"
 dashctl resolve blocker|question <id>
 ```
+
+`summary` is different from the rest: it's a single line shown next to
+the project name in its card, not a growing list -- each new one
+overwrites the last. `todo` items also get populated automatically if
+the agent uses Claude Code's own `TodoWrite` tool, via a
+`PostToolUse`/`TodoWrite` hook (`hooks/todo_sync_hook.py`,
+`busy_bee/todo_sync.py`) installed by the same `dashctl setup-global`
+-- no separate `dashctl todo` call needed for items already tracked
+there; completed ones become `done`s automatically too.
 
 The aggregator polls every 5s by default (configurable in
 `~/.claude-dashboard/config.json`), so give it a few seconds, then
@@ -202,9 +212,12 @@ busy_bee/
   terminal_launcher.py  osascript-driven click-to-resume / terminal reuse
   app.py                 rumps tray app + pywebview popover wiring
   icon.py                 renders the bee icon (menu bar + Dock, badge composited in)
-  global_setup.py         installs the CLAUDE.md snippet + Stop hook globally
-  ui/                     popover.html/css/js
-hooks/stop_hook.py     Claude Code Stop hook (the safety net)
+  todo_sync.py             syncs Claude Code's TodoWrite list into dashctl
+  global_setup.py           installs the CLAUDE.md snippet + Stop/PostToolUse hooks globally
+  ui/                        popover.html/css/js
+hooks/
+  stop_hook.py           Claude Code Stop hook (the safety net)
+  todo_sync_hook.py      PostToolUse/TodoWrite hook -- calls busy_bee/todo_sync.py
 claude_md_snippet.md   installed into ~/.claude/CLAUDE.md by setup-global
 scripts/
   install.sh                full install
