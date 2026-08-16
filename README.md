@@ -62,6 +62,12 @@ directly to run `dashctl`, or start a fresh session in that project.
 project under a name other than its directory's basename, or register
 it before an agent has logged anything there.)
 
+**Note:** `$HOME` itself is never auto-registered, even if a Claude
+Code session runs directly in it (not inside an actual project) --
+this happened live during testing and silently created a
+"yourusername" card. `dashctl init` still allows it explicitly, if
+that's really wanted.
+
 ### 4. It's already running; here's how to reopen or quit it
 
 `install.sh` installs and starts a `launchd` agent
@@ -73,9 +79,15 @@ quit until you bring it back.
 
 Look for the small 🐝 icon in your menu bar (top-right strip) --
 easy to miss among other menu bar icons, but it should be there within
-a few seconds of running the installer. Click it → "Show Dashboard" to
-open the popover. Click a project name inside a card to open a
-terminal and resume that project's Claude Code session (or focus the
+a few seconds of running the installer. It also now shows up in the
+Dock with the same bee icon (busy_bee/icon.py renders it), and either
+one badges with a red circle + number whenever there's an unresolved
+blocker/question anywhere -- the Dock badge is macOS's native
+`NSDockTile.badgeLabel`; the menu bar one is hand-composited to match,
+since status items don't have an equivalent native badge API. Click
+the tray icon → "Show Dashboard" to open the popover. Click a project
+name inside a card to open a terminal and resume that project's Claude
+Code session (or focus the
 existing one, if it's already open -- see Architecture). Clicking the
 popover window's red close button hides it rather than actually
 closing/destroying it, so "Show Dashboard" keeps working afterward --
@@ -175,6 +187,7 @@ busy_bee/
   aggregator.py         polls project paths, merges into the central store
   terminal_launcher.py  osascript-driven click-to-resume / terminal reuse
   app.py                 rumps tray app + pywebview popover wiring
+  icon.py                 renders the bee icon (menu bar + Dock, badge composited in)
   global_setup.py         installs the CLAUDE.md snippet + Stop hook globally
   ui/                     popover.html/css/js
 hooks/stop_hook.py     Claude Code Stop hook (the safety net)
