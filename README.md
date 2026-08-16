@@ -302,6 +302,15 @@ tests/
   permanent deadlock (cursor spins, nothing happens), not just
   slowness. Always dispatch it from a throwaway background thread
   (see `show_dashboard`/`_refresh_popover` in `app.py`).
+- **Don't drive periodic UI refresh from a JS `setInterval` in the
+  popover.** One was tried for polling `get_projects()`; confirmed
+  live that it silently stopped refreshing (or never reliably started)
+  while a separate Python-side `rumps.Timer` on the exact same 5s
+  cadence, driving the tray badge, kept working the whole time. The
+  popover's periodic refresh is now driven from that same Python timer
+  (`start_badge_timer`'s tick also spawns `_refresh_popover` on a
+  background thread) instead of trusting a JS timer with no visibility
+  into whether it's actually still running.
 
 ## Tests
 
