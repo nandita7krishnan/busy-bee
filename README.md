@@ -24,8 +24,8 @@ cd busy-bee
 
 This single command creates a `.venv`, installs the package plus
 `rumps`/`pywebview`, symlinks `dashctl` and `busy-bee` onto `PATH`,
-wires Claude Code up globally (step 3), and builds
-`/Applications/Busy Bee.app` (step 4).
+wires Claude Code up globally (step 3), and installs + starts a
+`launchd` agent that runs the app (step 4).
 
 ### 2. Confirm `dashctl` is actually on PATH
 
@@ -62,43 +62,43 @@ directly to run `dashctl`, or start a fresh session in that project.
 project under a name other than its directory's basename, or register
 it before an agent has logged anything there.)
 
-### 4. Launch the app
+### 4. Nothing to launch -- it's already running
 
-Launch **"Busy Bee"** from Spotlight (⌘Space, type "busy bee"),
-Launchpad, or by double-clicking it in `/Applications`.
+`install.sh` installs and starts a `launchd` agent
+(`~/Library/LaunchAgents/dev.busybee.app.plist`) that runs `busy-bee`
+automatically: once now, again every time you log in, and again within
+5 seconds of it ever stopping for any reason (including using the tray
+menu's "Quit" -- see the note below). You should never need to
+manually launch this app.
 
-A few things to know before you conclude it isn't working:
+Look for the small 🐝 icon in your menu bar (top-right strip) --
+easy to miss among other menu bar icons, but it should be there within
+a few seconds of running the installer. Click it → "Show Dashboard" to
+open the popover. Click a project name inside a card to open a
+terminal and resume that project's Claude Code session (or focus the
+existing one, if it's already open -- see Architecture).
 
-- **It's a menu-bar-only app.** `LSUIElement=true` means no Dock icon
-  and no window pop up on launch by design -- the only visible change
-  is a small 🐝 icon appearing in the menu bar (top-right strip),
-  easy to miss among other menu bar icons. Look there, not the Dock.
-- **Relaunching an already-running instance looks identical to "didn't
-  open."** Check first: `ps aux | grep busy-bee`. If it's already
-  running, there's nothing more to launch -- just look for the icon.
-- **Spotlight's search index can lag a few minutes after install**,
-  even though the app is fully installed and working. This is a
-  different system (`mds`, the OS's metadata index, not writable from
-  a normal shell) from Launch Services (what Launchpad, the Dock, and
-  double-click all use) -- `install.sh` updates Launch Services
-  immediately, so Launchpad/Dock/double-click work right away even
-  when Spotlight search hasn't caught up. If you don't want to wait:
-  `open -R "/Applications/Busy Bee.app"` reveals it in Finder,
-  draggable straight onto the Dock for permanent one-click access.
-- **Launchpad is not the App Store.** Easy to mix up -- Launchpad
-  shows installed apps as an icon grid (three-finger-and-thumb pinch
-  on the trackpad, or F4 on some keyboards -- not universal, varies by
-  Mac/keyboard); the App Store is a different app entirely for
-  downloading things, and will never show a locally-built app.
-- **A stray generic Python icon may appear in the Dock/Cmd+Tab
-  anyway**, despite `LSUIElement`. This is a known, currently-unfixed
-  packaging quirk -- see "Known limitations" below. The tray icon
-  itself still works correctly regardless; this is cosmetic.
+**Do not try to launch this as a normal macOS app** (Spotlight,
+Launchpad, double-clicking in `/Applications`) -- that path is
+verified broken (see Known limitations) and there's no packaged `.app`
+to find that way; the LaunchAgent above is the only supported way to
+run it. If the icon doesn't appear, check it's actually running:
 
-Click the 🐝 → "Show Dashboard" to open the popover. Click a project
-name inside a card to open a terminal and resume that project's
-Claude Code session (or focus the existing one, if it's already open
--- see Architecture).
+```
+ps aux | grep busy-bee
+tail -20 /tmp/busybee-agent.log
+```
+
+If it's not running, `bash scripts/install_launch_agent.sh` reinstalls
+and restarts the agent. To fully stop it (it won't come back until you
+load it again): `launchctl unload
+~/Library/LaunchAgents/dev.busybee.app.plist`.
+
+**Note on "Quit":** with `KeepAlive` set, quitting from the tray menu
+gets the process relaunched by launchd within ~5 seconds -- this is
+intentional (it's what makes the app always-available without you
+managing it), not a bug. Use `launchctl unload` above if you actually
+want it to stay stopped.
 
 ### 5. Log some status and watch it show up
 
@@ -118,10 +118,11 @@ reopen the popover -- that project's card should now be there.
 
 ### Reinstalling / updating after pulling new code
 
-`busy-bee` and `Busy Bee.app` both wrap `.venv`, not a frozen build --
-after pulling changes, re-run `./scripts/install.sh` (or just
-`scripts/build_app_bundle.sh` if only the app code changed, not
-dependencies) and relaunch.
+The LaunchAgent runs `.venv/bin/busy-bee` directly, not a frozen
+build -- after pulling code changes, `launchctl unload` then
+`scripts/install_launch_agent.sh` again (or just re-run
+`./scripts/install.sh`) to pick them up. Dependency changes need
+`pip install -e .` re-run first (part of `install.sh`).
 
 ## Architecture
 
@@ -174,34 +175,45 @@ busy_bee/
 hooks/stop_hook.py     Claude Code Stop hook (the safety net)
 claude_md_snippet.md   installed into ~/.claude/CLAUDE.md by setup-global
 scripts/
-  install.sh              full install
-  build_app_bundle.sh     builds/refreshes /Applications/Busy Bee.app
+  install.sh                full install
+  install_launch_agent.sh   installs/starts the launchd agent that runs the app
 tests/
 ```
 
 ## Known limitations
 
-- **Packaged `.app` has the wrong bundle identity.**
-  `Contents/MacOS/BusyBee` `exec`s the venv's `busy-bee`, whose
-  shebang resolves through Homebrew's Python framework, which itself
-  re-execs into *its own* `Python.app` (needed for AppKit/PyObjC to
-  get a valid WindowServer connection at all). Effect: macOS's
-  process-launch layer registers the running process against
-  `org.python.python`, not `dev.busybee.app` (confirmed via
-  `lsappinfo list`: `bundleID="org.python.python"`,
-  `type="Foreground"` instead of the `LSUIElement`-driven
-  `UIElement`). Setting `__CFBundleIdentifier` in the launcher script
-  (the trick tools like Platypus use) changes what
-  `NSBundle.mainBundle()` reports *from inside* the process, but
-  doesn't change how Launch Services classified it at launch --
-  that's decided from the actual executable's own bundle before the
-  env var is even read. The tray icon itself works fine regardless
-  (status items don't require correct bundle branding), so this is
-  cosmetic -- a stray generic Python icon in the Dock/Cmd+Tab, wrong
-  name in Activity Monitor -- not functionally broken. Real fix would
-  be building with `py2app` instead of a shell-script wrapper, since
-  that embeds a private Python framework copy inside the bundle itself
-  so there's no foreign bundle to get misattributed to. Not done yet.
+- **Launching as a normal macOS app (Spotlight/Launchpad/double-click)
+  is fundamentally broken -- use the LaunchAgent instead (see step 4
+  above).** This was tried first and seemed to work at a process
+  level (`ps` showed it running, no crash), but the tray icon never
+  actually appeared. Root-caused live via Console (`log show`): macOS's
+  Launch Services registers a GUI-launched process (`open -a`,
+  double-click, Spotlight, Launchpad -- all go through the same
+  `LSOpenApplication`-style path) differently from a plain subprocess
+  launch, and Control Center's status-item XPC service
+  (`com.apple.controlcenter.statusitems`) refuses the connection every
+  single time for a Launch-Services-launched instance of this app --
+  `scene activation failed: ... BSServiceConnectionErrorDomain ...
+  "XPC error received on message reply handler"`, retried
+  continuously, never succeeding. A plain subprocess launch (Terminal,
+  or a `launchd` agent -- neither goes through `LSOpenApplication`)
+  works every time, immediately, no errors. Compounding this: the
+  `.app` bundle also had the wrong bundle identity for unrelated
+  reasons (`Contents/MacOS/BusyBee` `exec`s the venv's `busy-bee`,
+  whose shebang resolves through Homebrew's Python framework, which
+  re-execs into *its own* `Python.app` -- Launch Services then
+  registers the process as `org.python.python`, not `dev.busybee.app`,
+  confirmed via `lsappinfo list`). Fixing *that* alone
+  (`__CFBundleIdentifier` in the launcher script) did not fix the
+  status-item failure, since that env var only changes what
+  `NSBundle.mainBundle()` reports from inside the process, not how
+  Launch Services classified the launch. Given neither issue is fixable
+  from a shell-script wrapper, the `.app` bundle approach was dropped
+  entirely in favor of the `launchd` agent, which sidesteps both
+  problems by not being a Launch-Services "app" launch at all. A
+  proper `py2app` build (private embedded Python framework, no foreign
+  bundle to get misattributed to) might make a real double-clickable
+  `.app` viable again, but hasn't been tried.
 - Clicking the tray icon shows a one-item menu ("Show Dashboard")
   rather than opening the popover directly on click -- `rumps` doesn't
   expose binding an arbitrary handler straight to the status item

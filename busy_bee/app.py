@@ -30,6 +30,7 @@ equivalent, one extra click.
 from __future__ import annotations
 
 import threading
+import time
 
 import rumps
 import webview
@@ -138,8 +139,20 @@ def _start_rumps_setup_without_blocking(app: BusyBeeApp) -> None:
 def _on_webview_loop_started(app: BusyBeeApp) -> None:
     """Runs on a background thread spawned by webview.start(); dispatches
     the actual AppKit setup back onto the main thread, which is the
-    PyObjC-sanctioned way to touch AppKit objects from off-thread."""
+    PyObjC-sanctioned way to touch AppKit objects from off-thread.
+
+    Waits a couple seconds before creating the status item, as cheap
+    insurance against creating it concurrently with pywebview's own
+    WKWebView/WebKit XPC setup -- both touch Control Center's
+    status-item scene-connection machinery. This turned out not to be
+    the main cause of status items failing to appear (that was
+    launching via Launch Services at all -- see README's Known
+    limitations, fixed by running this as a launchd agent instead of a
+    double-clickable .app), but it's a low-cost precaution and was
+    present during working runs, so it stays.
+    """
     run_aggregator_thread()
+    time.sleep(2)
     AppHelper.callAfter(_start_rumps_setup_without_blocking, app)
 
 
