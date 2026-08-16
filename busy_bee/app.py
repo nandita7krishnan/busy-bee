@@ -36,7 +36,7 @@ import rumps
 import webview
 from PyObjCTools import AppHelper
 
-from busy_bee import aggregator, config, db, terminal_launcher
+from busy_bee import aggregator, config, db, icon, terminal_launcher
 
 UI_DIR = __file__.rsplit("/", 1)[0] + "/ui"
 
@@ -86,7 +86,7 @@ class Api:
 
 class BusyBeeApp(rumps.App):
     def __init__(self, window: webview.Window):
-        super().__init__("busy-bee", title="🐝", menu=["Show Dashboard"])
+        super().__init__("busy-bee", icon=str(icon.render_tray_icon(0)), menu=["Show Dashboard"])
         self.window = window
 
     @rumps.clicked("Show Dashboard")
@@ -104,7 +104,12 @@ class BusyBeeApp(rumps.App):
 
     def refresh_badge(self) -> None:
         count = db.count_all_unresolved_blockers_and_questions()
-        self.title = f"🐝 🔴{count}" if count > 0 else "🐝"
+        self.icon = str(icon.render_tray_icon(count))
+
+        import AppKit
+
+        AppKit.NSApp.dockTile().setBadgeLabel_(str(count) if count else None)
+        AppKit.NSApp.dockTile().display()
 
     def start_badge_timer(self) -> None:
         def tick(_timer):
@@ -129,6 +134,19 @@ def _start_rumps_setup_without_blocking(app: BusyBeeApp) -> None:
         app.run()
     finally:
         AppHelper.runEventLoop = original_run_event_loop
+
+    import AppKit
+
+    # Gives busy-bee an actual Dock icon (previously accessory-only/
+    # no Dock presence) using the same bee art, with macOS's own
+    # native badge widget -- set explicitly here rather than relying
+    # on Info.plist's LSUIElement, since the packaged .app's bundle
+    # identity doesn't reliably apply to this process anyway (see
+    # README's Known limitations).
+    AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+    dock_image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon.render_plain_bee()))
+    AppKit.NSApp.setApplicationIconImage_(dock_image)
+
     app.start_badge_timer()
     app.refresh_badge()
 

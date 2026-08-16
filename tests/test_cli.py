@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from busy_bee import cli, config, project_store
@@ -35,6 +37,16 @@ def test_log_auto_registers_project_without_init(tmp_path, monkeypatch):
     assert len(projects) == 1
     assert projects[0]["name"] == "auto-proj"
     assert projects[0]["path"] == str(project_dir.resolve())
+
+
+def test_log_does_not_auto_register_home_directory(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    monkeypatch.chdir(fake_home)
+
+    cli.main(["done", "just poking around"])
+    assert config.list_projects() == []
 
 
 def test_log_does_not_duplicate_registration(tmp_path, monkeypatch):

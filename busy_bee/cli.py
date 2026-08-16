@@ -41,7 +41,15 @@ def _project_root() -> Path:
 
 def _auto_register(root: Path) -> None:
     """Registers the project under its directory name if it isn't
-    already tracked. A no-op (besides a cheap config read) if it is."""
+    already tracked. A no-op (besides a cheap config read) if it is.
+
+    Skips the home directory itself -- a Claude Code session run
+    directly in $HOME (not inside an actual project) would otherwise
+    silently register "yourusername" as a tracked project. `dashctl
+    init` still allows it explicitly, if that's really what's wanted.
+    """
+    if root == Path.home():
+        return
     known_paths = {p["path"] for p in config.list_projects()}
     if str(root) not in known_paths:
         config.add_project(root.name, str(root))

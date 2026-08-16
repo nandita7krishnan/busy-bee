@@ -23,7 +23,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="dev.busybee.app"
 APP_DIR="${APP_DIR:-/Applications/Open Busy Bee.app}"
 
-mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -44,6 +44,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>OpenBusyBee</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
     <key>LSUIElement</key>
     <true/>
     <key>LSBackgroundOnly</key>
@@ -51,6 +53,22 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Build icon.icns from the same bee art used everywhere else (the
+# tray icon, the Dock icon), so this app looks recognizable in
+# Finder/Launchpad/Dock instead of a generic icon.
+BEE_PNG="$("$REPO_DIR/.venv/bin/python" -c "from busy_bee.icon import render_plain_bee; print(render_plain_bee())")"
+ICONSET="$(mktemp -d)/icon.iconset"
+mkdir -p "$ICONSET"
+for spec in "16:icon_16x16" "32:icon_16x16@2x" "32:icon_32x32" "64:icon_32x32@2x" \
+            "128:icon_128x128" "256:icon_128x128@2x" "256:icon_256x256" \
+            "512:icon_256x256@2x" "512:icon_512x512" "1024:icon_512x512@2x"; do
+    px="${spec%%:*}"
+    name="${spec##*:}"
+    sips -z "$px" "$px" "$BEE_PNG" --out "$ICONSET/$name.png" >/dev/null 2>&1
+done
+iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/icon.icns"
+rm -rf "$(dirname "$ICONSET")"
 
 cat > "$APP_DIR/Contents/MacOS/OpenBusyBee" <<LAUNCHER
 #!/bin/bash
