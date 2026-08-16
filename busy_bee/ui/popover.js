@@ -28,11 +28,16 @@ function renderColumn(title, items, className, emptyLabel) {
 }
 
 function renderFlagLine(item, type) {
+  // No manual "resolve" here -- this should stay a faithful mirror of
+  // the actual terminal, not a place that can drift from it. Real
+  // resolution happens when the agent calls `dashctl resolve` after
+  // the user responds in that terminal. Clicking a flag line just
+  // takes you there, same as clicking the project name.
   return `
-    <div class="flag-line ${type}">
+    <div class="flag-line ${type}" data-open-terminal>
       <span class="dot"></span>
-      <span>${escapeHtml(item.text)}</span>
-      <button class="resolve-btn" data-resolve-id="${item.id}" data-resolve-type="${type}">resolve</button>
+      <span class="item-text">${escapeHtml(item.text)}</span>
+      <span class="goto-terminal">open →</span>
     </div>
   `;
 }
@@ -89,7 +94,7 @@ function render(projects) {
 
   cardsEl.querySelectorAll("[data-toggle]").forEach((header) => {
     header.addEventListener("click", (e) => {
-      if (e.target.closest("[data-open-terminal]") || e.target.closest("[data-resolve-id]")) return;
+      if (e.target.closest("[data-open-terminal]")) return;
       header.closest(".card").classList.toggle("expanded");
     });
   });
@@ -101,14 +106,6 @@ function render(projects) {
       window.pywebview.api.open_terminal(project);
     });
   });
-
-  cardsEl.querySelectorAll("[data-resolve-id]").forEach((btn) => {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await window.pywebview.api.resolve_item(parseInt(btn.dataset.resolveId, 10));
-      loadProjects();
-    });
-  });
 }
 
 async function loadProjects() {
@@ -116,4 +113,14 @@ async function loadProjects() {
   render(projects);
 }
 
-window.addEventListener("pywebviewready", loadProjects);
+async function startAutoRefresh() {
+  await loadProjects();
+  // Matches the aggregator's own poll interval (fetched, not
+  // hardcoded, so changing poll_interval_seconds in config.json can't
+  // make this drift out of sync with it) -- otherwise this window
+  // just sitting open would silently go stale between clicks.
+  const intervalSeconds = await window.pywebview.api.get_poll_interval_seconds();
+  setInterval(loadProjects, intervalSeconds * 1000);
+}
+
+window.addEventListener("pywebviewready", startAutoRefresh);

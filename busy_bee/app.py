@@ -80,11 +80,8 @@ class Api:
             project["path"], cfg.get("terminal_app", "Terminal"), tty=project["terminal_tty"]
         )
 
-    def resolve_item(self, item_id: int) -> bool:
-        return db.resolve_item_by_id(item_id)
-
-    def add_manual_item(self, project_name: str, item_type: str, text: str) -> int:
-        return db.add_manual_item(project_name, item_type, text)
+    def get_poll_interval_seconds(self) -> int:
+        return config.load_config().get("poll_interval_seconds", 5)
 
 
 class BusyBeeApp(rumps.App):

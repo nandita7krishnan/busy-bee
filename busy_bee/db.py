@@ -115,27 +115,6 @@ def upsert_item(
         )
 
 
-def add_manual_item(project: str, item_type: str, text: str) -> int:
-    with connect() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO items (project, type, text, created_at, resolved_at, source, source_id)
-            VALUES (?, ?, ?, ?, NULL, 'manual', NULL)
-            """,
-            (project, item_type, text, datetime.now(timezone.utc).isoformat()),
-        )
-        return cur.lastrowid
-
-
-def resolve_item_by_id(item_id: int) -> bool:
-    with connect() as conn:
-        cur = conn.execute(
-            "UPDATE items SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL",
-            (datetime.now(timezone.utc).isoformat(), item_id),
-        )
-        return cur.rowcount > 0
-
-
 def get_projects() -> list[sqlite3.Row]:
     with connect() as conn:
         return conn.execute("SELECT * FROM projects ORDER BY name").fetchall()

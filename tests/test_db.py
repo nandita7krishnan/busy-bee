@@ -75,19 +75,10 @@ def test_get_unresolved_excludes_resolved():
     assert rows[0]["text"] == "stuck"
 
 
-def test_resolve_item_by_id():
-    item_id = db.add_manual_item("p1", "blocker", "manual blocker")
-    assert db.resolve_item_by_id(item_id) is True
-    rows = db.get_unresolved("p1", "blocker")
-    assert rows == []
-    # resolving again is a no-op, not an error
-    assert db.resolve_item_by_id(item_id) is False
-
-
 def test_count_all_unresolved_blockers_and_questions():
-    db.add_manual_item("p1", "blocker", "b")
-    db.add_manual_item("p2", "question", "q")
-    db.add_manual_item("p2", "done", "d")
+    db.upsert_item("p1", "blocker", "b", "2026-08-14T10:00:00+00:00", None, "agent", "id1")
+    db.upsert_item("p2", "question", "q", "2026-08-14T10:00:00+00:00", None, "agent", "id2")
+    db.upsert_item("p2", "done", "d", "2026-08-14T10:00:00+00:00", None, "agent", "id3")
     assert db.count_all_unresolved_blockers_and_questions() == 2
 
 
