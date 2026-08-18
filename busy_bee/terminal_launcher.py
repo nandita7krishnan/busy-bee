@@ -159,16 +159,23 @@ def prune_colored_ttys(live_ttys: set[str]) -> None:
 
 
 def _is_dark_tab(window_id: str, tab_index: str) -> bool:
-    """Reads the tab's *current* background color -- before we've
-    touched it -- to decide whether it's running a light or dark
-    theme, so a project's tint stays legible against either. Read per-
-    tab rather than going off the system-wide dark mode setting: a
-    Terminal profile's theme doesn't have to match macOS's overall
-    appearance, and this is the color that actually determines whether
-    the existing text is calibrated for a light or dark background."""
+    """Reads the tab's foreground *text* color, not its background, to
+    decide whether it's running a light or dark theme. Background is
+    the wrong signal to read: it's exactly what this module itself
+    repaints, so on any tab already tinted in an earlier run (which by
+    now is most long-lived ones) it just reflects our own previous
+    guess, not the tab's real native theme -- self-poisoning, and
+    confirmed live: every currently-open tab's foreground turned out to
+    be white (a dark theme) while every one of their backgrounds had
+    already been overwritten light by an earlier pass, so a
+    background-based check could never detect dark again once applied
+    once. Foreground color is something this module never touches, so
+    it stays a reliable signal either way: bright/white text implies a
+    profile built for a dark background, dark/black text implies one
+    built for a light background."""
     script = f"""
 tell application "Terminal"
-    background color of tab {tab_index} of (first window whose id is {window_id})
+    normal text color of tab {tab_index} of (first window whose id is {window_id})
 end tell
 """
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
@@ -181,7 +188,7 @@ end tell
         r, g, b = (int(p) / 65535 for p in parts)
     except ValueError:
         return False
-    return colors._relative_luminance((r, g, b)) < 0.5
+    return colors._relative_luminance((r, g, b)) > 0.5
 
 
 def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
@@ -198,10 +205,10 @@ def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
     full-saturation card color made Claude Code's own text hard to
     read. The darkened variant keeps the same hue (still visually ties
     the tab to its card) at a background-appropriate lightness, light
-    or dark depending on what that particular tab was already running
-    (see _is_dark_tab) -- checked per-tab, not once per project, since
-    two Terminal windows for the same project could each be on a
-    different profile."""
+    or dark depending on what that particular tab's foreground text
+    color implies (see _is_dark_tab) -- checked per-tab, not once per
+    project, since two Terminal windows for the same project could
+    each be on a different profile."""
     for tty in live_ttys:
         if tty in _colored_ttys:
             continue

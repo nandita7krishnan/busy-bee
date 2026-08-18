@@ -215,16 +215,18 @@ def test_sync_session_colors_uses_dark_variant_for_a_dark_tab(monkeypatch):
     assert colored == [tl.colors.terminal_background_color("my-project", dark=True)]
 
 
-def test_is_dark_tab_true_for_a_near_black_background(monkeypatch):
+def test_is_dark_tab_true_for_a_near_white_foreground(monkeypatch):
+    # White/bright text implies a profile built for a dark background.
     monkeypatch.setattr(
-        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="2000, 2000, 2000\n")
+        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="63000, 63000, 63000\n")
     )
     assert tl._is_dark_tab("9", "1") is True
 
 
-def test_is_dark_tab_false_for_a_near_white_background(monkeypatch):
+def test_is_dark_tab_false_for_a_near_black_foreground(monkeypatch):
+    # Dark/black text implies a profile built for a light background.
     monkeypatch.setattr(
-        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="63000, 63000, 63000\n")
+        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="2000, 2000, 2000\n")
     )
     assert tl._is_dark_tab("9", "1") is False
 
