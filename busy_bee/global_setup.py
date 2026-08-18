@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SNIPPET_PATH = REPO_ROOT / "claude_md_snippet.md"
 STOP_HOOK_PATH = REPO_ROOT / "hooks" / "stop_hook.py"
 TODO_SYNC_HOOK_PATH = REPO_ROOT / "hooks" / "todo_sync_hook.py"
+SESSION_START_HOOK_PATH = REPO_ROOT / "hooks" / "session_start_hook.py"
 
 MARKER_START = "<!-- busy-bee:start -->"
 MARKER_END = "<!-- busy-bee:end -->"
@@ -82,10 +83,15 @@ def install_todo_sync_hook(python_path: str = "python3") -> str:
     )
 
 
+def install_session_start_hook(python_path: str = "python3") -> str:
+    return _install_hook("SessionStart", f"{python_path} {SESSION_START_HOOK_PATH}")
+
+
 def main() -> int:
     print(f"CLAUDE.md snippet: {install_claude_md_snippet()}")
     print(f"Stop hook: {install_stop_hook()}")
     print(f"TodoWrite sync hook: {install_todo_sync_hook()}")
+    print(f"SessionStart hook: {install_session_start_hook()}")
     print()
     print("Every Claude Code session on this machine will now log status to")
     print("busy-bee, and dashctl auto-registers a project the first time it")

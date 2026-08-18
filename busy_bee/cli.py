@@ -39,7 +39,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from busy_bee import config, global_setup, project_store
+from busy_bee import config, db, global_setup, project_store
 
 
 def _project_root() -> Path:
@@ -115,6 +115,15 @@ def cmd_init(name: str | None) -> int:
     return 0
 
 
+def cmd_untrack(name: str) -> int:
+    removed_from_config = config.remove_project(name)
+    db.delete_project(name)
+    if not removed_from_config:
+        print(f"{name!r} wasn't in config.json (removing any leftover db rows anyway)")
+    print(f"untracked {name!r} -- it and its logged items no longer appear on the dashboard")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dashctl", description="Log status for busy-bee.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -131,6 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
         "init", help="register the current directory under an explicit name"
     )
     init_p.add_argument("--name", default=None, help="project name (defaults to directory name)")
+
+    untrack_p = sub.add_parser(
+        "untrack", help="stop tracking a project and remove its logged items"
+    )
+    untrack_p.add_argument("name", help="project name, as shown on the dashboard")
 
     sub.add_parser(
         "setup-global",
@@ -150,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_resolve(args.type, args.id)
     if args.command == "init":
         return cmd_init(args.name)
+    if args.command == "untrack":
+        return cmd_untrack(args.name)
     if args.command == "setup-global":
         return global_setup.main()
 

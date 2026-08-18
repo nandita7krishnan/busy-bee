@@ -35,6 +35,9 @@ reasoning/detail out -- it's in your own conversation already.
   "<one sentence on where things stand>"`. This is different from the
   above -- it doesn't add to a growing list, it's a single line shown
   next to the project name, overwritten each time. Keep it very short.
+  Every 10th turn (starting with the first), the Stop hook requires
+  this one specifically, not just any item -- don't wait for a natural
+  wrap-up point on those turns.
 
 If the TodoWrite tool is available and used, its list is synced into
 dashctl automatically via a hook -- no need to separately call

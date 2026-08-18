@@ -9,6 +9,7 @@ from busy_bee import aggregator, config, db, project_store
 def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "db.sqlite")
     monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: None)
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: None)
     db.init_db()
     yield
 
@@ -85,6 +86,45 @@ def test_sync_project_records_terminal_tty_per_item(tmp_path, monkeypatch):
     assert db.get_project_ttys("proj") == ["ttys002"]
 
 
+def test_sync_project_records_session_id_per_item(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: "session-1")
+    project_store.add_item(project_dir, "done", "did a thing")
+
+    aggregator.sync_project("proj", str(project_dir))
+
+    assert db.latest_session_id_for_tty("proj", "ttys002") == "session-1"
+
+
+def test_sync_project_auto_resolves_blocker_from_closed_terminal(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    project_store.add_item(project_dir, "blocker", "need API key")
+
+    # No live ttys passed -- as if the terminal that logged this blocker
+    # has since closed.
+    aggregator.sync_project("proj", str(project_dir), frozenset())
+
+    project = db.get_project("proj")
+    assert project["status"] != "blocked"
+    assert db.get_unresolved("proj", "blocker") == []
+
+
+def test_sync_project_keeps_blocker_from_live_terminal(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    project_store.add_item(project_dir, "blocker", "need API key")
+
+    aggregator.sync_project("proj", str(project_dir), frozenset({"ttys002"}))
+
+    project = db.get_project("proj")
+    assert project["status"] == "blocked"
+
+
 def test_sync_project_propagates_last_summary(tmp_path):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
@@ -94,6 +134,28 @@ def test_sync_project_propagates_last_summary(tmp_path):
 
     project = db.get_project("proj")
     assert project["last_summary"] == "auth flow mostly done"
+
+
+def test_sync_session_state_attributes_tty_to_most_recent_project_only(monkeypatch):
+    # Same tty (one long-running `claude` process) logged to "home"
+    # first, then the conversation `cd`'d into "other-repo" -- the live
+    # session block should follow the tty to "other-repo" and disappear
+    # from "home", not show up in both.
+    db.upsert_item("home", "done", "started here", "2026-08-14T10:00:00+00:00", None, "agent", "a1", terminal_tty="ttys002")
+    db.upsert_item("other-repo", "done", "moved here", "2026-08-14T10:05:00+00:00", None, "agent", "b1", terminal_tty="ttys002")
+
+    calls = {}
+    monkeypatch.setattr(
+        aggregator.terminal_launcher, "sync_session_colors", lambda name, ttys: calls.setdefault(name, ttys)
+    )
+
+    live_ttys = frozenset({"ttys002"})
+    current_project_by_tty = db.current_project_by_tty()
+    aggregator.sync_session_state("home", live_ttys, current_project_by_tty)
+    aggregator.sync_session_state("other-repo", live_ttys, current_project_by_tty)
+
+    assert calls["home"] == []
+    assert calls["other-repo"] == ["ttys002"]
 
 
 def test_sync_all_uses_config(tmp_path, monkeypatch):

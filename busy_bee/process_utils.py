@@ -50,6 +50,16 @@ def find_claude_ancestor_tty(max_hops: int = 20) -> str | None:
     return None
 
 
+def current_session_id() -> str | None:
+    """The Claude Code session id (a UUID Claude Code assigns per
+    invocation, distinct even across two `claude` runs in the same
+    terminal tty), from the CLAUDE_CODE_SESSION_ID env var it sets on
+    every process it spawns. Used to scope "this session's" history so
+    a fresh session doesn't inherit an unrelated old session's items
+    just because the OS happened to reuse the same tty."""
+    return os.environ.get("CLAUDE_CODE_SESSION_ID")
+
+
 def live_claude_ttys() -> set[str]:
     """Every tty device name that currently has a running `claude`
     process attached. Used to tell whether a previously-logged session

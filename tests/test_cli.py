@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from busy_bee import cli, config, project_store
+from busy_bee import cli, config, db, project_store
 
 
 @pytest.fixture(autouse=True)
@@ -10,6 +10,7 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "cfg" / "config.json")
     monkeypatch.setattr(config, "HOME_DIR", tmp_path / "cfg")
     monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: None)
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: None)
     yield
 
 
@@ -128,3 +129,39 @@ def test_init_registers_project(tmp_path, monkeypatch):
     assert len(projects) == 1
     assert projects[0]["name"] == "my-proj"
     assert projects[0]["path"] == str(project_dir)
+
+
+def test_untrack_removes_project_from_config_and_db(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "cfg" / "db.sqlite")
+    db.init_db()
+
+    project_dir = tmp_path / "stray-proj"
+    config.add_project("stray-proj", str(project_dir))
+    db.upsert_project("stray-proj", str(project_dir))
+    db.upsert_item(
+        project="stray-proj",
+        item_type="done",
+        text="logged before being untracked",
+        created_at="2026-08-18T00:00:00+00:00",
+        resolved_at=None,
+        source="agent",
+        source_id=None,
+    )
+
+    assert cli.main(["untrack", "stray-proj"]) == 0
+    out = capsys.readouterr().out
+    assert "untracked 'stray-proj'" in out
+
+    assert config.list_projects() == []
+    assert db.get_project("stray-proj") is None
+    assert db.get_recent_done("stray-proj") == []
+
+
+def test_untrack_unknown_project_still_clears_db(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "cfg" / "db.sqlite")
+    db.init_db()
+
+    assert cli.main(["untrack", "never-registered"]) == 0
+    out = capsys.readouterr().out
+    assert "wasn't in config.json" in out
+    assert "untracked 'never-registered'" in out

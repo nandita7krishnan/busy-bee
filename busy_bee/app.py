@@ -55,6 +55,12 @@ class Api:
     def get_projects(self) -> list[dict]:
         projects = db.get_projects()
         live_ttys = process_utils.live_claude_ttys()
+        # A tty can appear in more than one project's history if a single
+        # conversation `cd`'d from one tracked project to another without
+        # the terminal itself closing -- current_project_by_tty() picks
+        # the one it most recently logged to, so the session block moves
+        # with it instead of lingering on every project it ever visited.
+        current_project_by_tty = db.current_project_by_tty()
         result = []
         for p in projects:
             # A "session" only exists on the dashboard while its
@@ -62,7 +68,22 @@ class Api:
             # process state, not a time-since-last-log guess, so a
             # closed session's block disappears on the very next poll
             # instead of lingering.
-            live_session_ttys = [t for t in db.get_project_ttys(p["name"]) if t in live_ttys]
+            live_session_ttys = [
+                t
+                for t in db.get_project_ttys(p["name"])
+                if t in live_ttys and current_project_by_tty.get(t) == p["name"]
+            ]
+
+            # A project's card now tracks "is someone actively working on
+            # this right now", not "has this ever been logged to" -- the
+            # same rule a session block already followed on its own. Skip
+            # it entirely once its last terminal closes, rather than
+            # leaving a stale card (with a now-meaningless "open" affordance
+            # pointing at a dead terminal) sitting on the dashboard
+            # indefinitely. Its history isn't lost -- it's still in the
+            # db and reappears the moment a new session logs to it again.
+            if not live_session_ttys:
+                continue
 
             # Fetched once per project, then split by tty below -- each
             # blocker/question already carries the tty that logged it,
@@ -79,38 +100,49 @@ class Api:
                 for row in db.get_unresolved(p["name"], "question")
             ]
 
-            sessions = [
-                {
-                    "tty": tty,
-                    # Prefer the agent's own `dashctl summary` for this
-                    # session -- a far more useful label than "Session
-                    # 1", and more accurate than Claude Code's
-                    # auto-generated Terminal tab title, which is set
-                    # once early on and often drifts from what the
-                    # session ends up actually being about. Falls back
-                    # to that tab title, then the tty itself, so the UI
-                    # always has *some* stable per-session label.
-                    "name": (
-                        db.get_latest_summary_for_tty(p["name"], tty)
-                        or terminal_launcher.session_title_for_tty(tty)
-                        or tty
-                    ),
-                    "done": [row["text"] for row in db.get_recent_done(p["name"], terminal_tty=tty)],
-                    "todo": [row["text"] for row in db.get_next_todo(p["name"], terminal_tty=tty)],
-                    "blockers": [b for b in blockers_all if b["tty"] == tty],
-                    "questions": [q for q in questions_all if q["tty"] == tty],
-                }
-                for tty in live_session_ttys
-            ]
+            sessions = []
+            for tty in live_session_ttys:
+                # A tty is reused across unrelated `claude` invocations
+                # in the same terminal window, so scope this session's
+                # done/todo/summary by its actual session_id (the most
+                # recent one logged to this tty) rather than the tty
+                # alone -- otherwise a brand new session here would
+                # inherit a previous, unrelated session's history.
+                session_id = db.latest_session_id_for_tty(p["name"], tty)
+                sessions.append(
+                    {
+                        "tty": tty,
+                        # Prefer the agent's own `dashctl summary` for this
+                        # session -- a far more useful label than "Session
+                        # 1", and more accurate than Claude Code's
+                        # auto-generated Terminal tab title, which is set
+                        # once early on and often drifts from what the
+                        # session ends up actually being about. Falls back
+                        # to that tab title, then the tty itself, so the UI
+                        # always has *some* stable per-session label.
+                        "name": (
+                            db.get_latest_summary_for_tty(p["name"], tty, session_id=session_id)
+                            or terminal_launcher.session_title_for_tty(tty)
+                            or tty
+                        ),
+                        "done": [
+                            row["text"]
+                            for row in db.get_recent_done(p["name"], terminal_tty=tty, session_id=session_id)
+                        ],
+                        "todo": [
+                            row["text"]
+                            for row in db.get_next_todo(p["name"], terminal_tty=tty, session_id=session_id)
+                        ],
+                        "blockers": [b for b in blockers_all if b["tty"] == tty],
+                        "questions": [q for q in questions_all if q["tty"] == tty],
+                    }
+                )
 
-            if sessions:
-                # Broken out per-session below instead -- a flat
-                # cross-session list would interleave unrelated tasks
-                # from two agents into one confusing feed.
-                done, todo = [], []
-            else:
-                done = [row["text"] for row in db.get_recent_done(p["name"])]
-                todo = [row["text"] for row in db.get_next_todo(p["name"])]
+            # Always non-empty here (a project with none was skipped
+            # above) -- broken out per-session instead of a flat
+            # cross-session list, which would interleave unrelated tasks
+            # from two agents into one confusing feed.
+            done, todo = [], []
 
             blockers = [b for b in blockers_all if b["tty"] not in live_session_ttys]
             questions = [q for q in questions_all if q["tty"] not in live_session_ttys]

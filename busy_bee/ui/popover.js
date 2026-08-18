@@ -102,10 +102,6 @@ function renderCard(project) {
       </div>`
     : "";
 
-  const summaryHtml = project.summary
-    ? `<span class="summary-text" title="${escapeHtml(project.summary)}">${escapeHtml(project.summary)}</span>`
-    : "";
-
   // With one live session (the common case) the header still resumes
   // it directly, same as before sessions existed. With several, which
   // one the header itself should resume is ambiguous, so it defers to
@@ -127,7 +123,6 @@ function renderCard(project) {
         <span class="chevron">&#9656;</span>
         <div class="title-row" ${titleOpensTerminal ? `data-open-terminal${titleTtyAttr}` : ""}>
           <span class="project-name">${escapeHtml(project.name)}</span>
-          ${summaryHtml}
         </div>
         ${badges}
       </div>

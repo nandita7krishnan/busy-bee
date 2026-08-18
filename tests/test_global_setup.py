@@ -121,3 +121,25 @@ def test_stop_hook_and_todo_sync_hook_coexist():
     settings = json.loads(global_setup.SETTINGS_PATH.read_text())
     assert "stop_hook.py" in settings["hooks"]["Stop"][0]["hooks"][0]["command"]
     assert "todo_sync_hook.py" in settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+
+
+def test_install_session_start_hook_creates_settings():
+    result = global_setup.install_session_start_hook(python_path="python3")
+    assert "added" in result
+
+    settings = json.loads(global_setup.SETTINGS_PATH.read_text())
+    commands = [
+        h["command"]
+        for entry in settings["hooks"]["SessionStart"]
+        for h in entry["hooks"]
+    ]
+    assert any("session_start_hook.py" in c for c in commands)
+
+
+def test_install_session_start_hook_is_idempotent():
+    global_setup.install_session_start_hook(python_path="python3")
+    result = global_setup.install_session_start_hook(python_path="python3")
+    assert "already present" in result
+
+    settings = json.loads(global_setup.SETTINGS_PATH.read_text())
+    assert len(settings["hooks"]["SessionStart"]) == 1

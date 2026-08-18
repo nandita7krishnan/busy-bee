@@ -109,16 +109,6 @@ body {
   flex-shrink: 0;
 }
 
-.summary-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-muted);
-}
-
 .badge {
   display: inline-flex;
   align-items: center;
@@ -133,7 +123,7 @@ body {
 }
 
 .badge.blocker { background: var(--coral); }
-.badge.question { background: var(--amber); }
+.badge.question { background: var(--coral); }
 
 .chevron {
   color: var(--text-muted);
