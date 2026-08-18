@@ -20,20 +20,19 @@ PROJECT_COLORS = [
     "#8e9b1f",
 ]
 
-# A fixed HSL lightness (tried first at 0.14, then 0.22) still read as
-# noticeably darker for blue/purple projects than for yellow/green ones
-# even at the "same" setting -- confirmed by computing WCAG relative
-# luminance for each: busy-bee's blue-purple hue only reached 0.145 at
-# L=0.22 while proj-c's yellow-green hue reached 0.229 at that same L.
-# That's because HSL lightness doesn't track perceived brightness --
-# green contributes ~10x more to how bright a color looks than blue
-# does (the 0.7152 vs 0.0722 weights below). Targeting a fixed
-# *luminance* instead (found per-hue via binary search over L) makes
-# every project's background read as equally light regardless of hue,
-# and fixes the "still too dark" feedback at its actual root cause
-# instead of just nudging one global number again.
-_TERMINAL_BG_TARGET_LUMINANCE = 0.38
-_TERMINAL_BG_SATURATION_CAP = 0.42
+# Went through two dark/medium attempts (HSL L=0.14, then 0.22 -- both
+# still read as "too dark", and inconsistently so across hues, since
+# HSL lightness doesn't track perceived brightness -- see the luminance
+# comment on _lightness_for_target_luminance). Direct feedback then
+# reframed the actual goal: Claude Code's own text already reads well
+# on a plain white background, and its many different text colors
+# (white/gray/blue links/etc.) were never going to all have good
+# contrast against any one mid-brightness color anyway. So instead of
+# hunting for a "dark theme that works," target a pale, near-white tint
+# instead -- barely-there color on top of what's essentially still a
+# white background, still enough to tell projects apart at a glance.
+_TERMINAL_BG_TARGET_LUMINANCE = 0.90
+_TERMINAL_BG_SATURATION_CAP = 0.18
 
 
 def _hex_to_rgb01(hex_color: str) -> tuple[float, float, float]:
@@ -70,16 +69,17 @@ def project_color(name: str) -> str:
 
 
 def terminal_background_color(name: str) -> str:
-    """A dark, desaturated variant of the project's color, for use as
-    a full Terminal tab background. The vivid PROJECT_COLORS work fine
-    as a thin accent (the popover card's left border), but are far too
-    saturated/bright to paint an entire terminal background with --
-    real screenshot showed Claude Code's own text becoming hard to
-    read against them. Keeps the same hue (still visually ties the tab
-    to its dashboard card), capped saturation, and a lightness solved
-    per-hue to hit a consistent target *perceived* brightness -- see
-    the comment on _TERMINAL_BG_TARGET_LUMINANCE for why a flat HSL
-    lightness doesn't do that on its own."""
+    """A pale, barely-there tint of the project's color, for use as a
+    full Terminal tab background. The vivid PROJECT_COLORS work fine as
+    a thin accent (the popover card's left border), but are far too
+    saturated/bright to paint an entire terminal background with, and
+    even a darkened/desaturated variant fights with Claude Code's many
+    different text colors, which are calibrated for a plain white
+    background. Keeps the same hue (still visually ties the tab to its
+    dashboard card), heavily capped saturation, and a lightness solved
+    per-hue to hit a consistent target *perceived* brightness near
+    white -- see the comment on _TERMINAL_BG_TARGET_LUMINANCE for why a
+    flat HSL lightness doesn't do that on its own."""
     base_r, base_g, base_b = _hex_to_rgb01(project_color(name))
     hue, _lightness, saturation = colorsys.rgb_to_hls(base_r, base_g, base_b)
     saturation = min(saturation, _TERMINAL_BG_SATURATION_CAP)
