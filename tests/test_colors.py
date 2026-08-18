@@ -62,10 +62,11 @@ def test_terminal_background_color_caps_saturation():
             hex_color = colors.terminal_background_color(name, dark=dark)
             r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5))
             _, _lightness, saturation = colorsys.rgb_to_hls(r, g, b)
+            cap = colors._TERMINAL_BG_SATURATION_CAP_DARK if dark else colors._TERMINAL_BG_SATURATION_CAP_LIGHT
             # Tolerance for 8-bit RGB rounding on the way back from the
             # capped HLS value -- not perfectly reversible, and more
             # pronounced now that saturation is capped quite low.
-            assert saturation <= colors._TERMINAL_BG_SATURATION_CAP + 0.03
+            assert saturation <= cap + 0.03
 
 
 def test_terminal_background_color_keeps_the_same_hue_as_project_color():

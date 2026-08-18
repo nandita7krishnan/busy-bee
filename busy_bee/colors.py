@@ -38,15 +38,18 @@ PROJECT_COLORS = [
 # 0.88 -> 0.92) chasing "closer to white" while re-checking each time
 # that 0.55 saturation still keeps all 8 hues visibly distinct.
 _TERMINAL_BG_TARGET_LUMINANCE_LIGHT = 0.92
-# The dark-mode target isn't a guess in isolation -- it's the *same*
-# 0.14-0.22 range that read as "too dark" earlier, which only failed
-# because it was being applied to a terminal actually running a light
-# theme (light background, dark text): forcing a near-black perceived
-# brightness onto that clashed. Applied only when the terminal itself
-# is in dark mode (light text, calibrated for a dark background), the
-# same low-luminance tint is the right target, not a mistake to avoid.
-_TERMINAL_BG_TARGET_LUMINANCE_DARK = 0.16
-_TERMINAL_BG_SATURATION_CAP = 0.55
+# First dark-mode pass reused the light-mode 0.55 saturation cap at
+# luminance 0.16 -- confirmed live as "terrible": at that saturation, a
+# hue like the indigo project color came out as a vivid near-neon blue
+# rather than a muted dark-UI surface (typical dark editor/terminal
+# backgrounds are both darker and far less saturated than their light-
+# mode counterparts, not just an inverted version of the same recipe).
+# Dropped luminance further and capped saturation much harder so the
+# tint reads as "dark surface with a whisper of hue," not a bright
+# color that happens to be dark.
+_TERMINAL_BG_TARGET_LUMINANCE_DARK = 0.10
+_TERMINAL_BG_SATURATION_CAP_LIGHT = 0.55
+_TERMINAL_BG_SATURATION_CAP_DARK = 0.30
 
 
 def _hex_to_rgb01(hex_color: str) -> tuple[float, float, float]:
@@ -90,16 +93,18 @@ def terminal_background_color(name: str, dark: bool = False) -> str:
     darkened/desaturated variant fights with Claude Code's own text
     colors -- which are calibrated for whichever background the
     terminal is actually running against. Keeps the same hue (still
-    visually ties the tab to its dashboard card) and heavily capped
-    saturation either way; only the target *perceived* brightness
-    flips, to a pale near-white tint for a light-background terminal
-    (dark=False, the default) or a dark near-black tint for a
-    dark-background one (dark=True) -- see the comments on
-    _TERMINAL_BG_TARGET_LUMINANCE_LIGHT/_DARK for why a flat HSL
-    lightness can't hit either target consistently on its own."""
+    visually ties the tab to its dashboard card), though both the
+    target *perceived* brightness and the saturation cap flip: a pale
+    near-white tint for a light-background terminal (dark=False, the
+    default) or a muted dark near-black tint for a dark-background one
+    (dark=True) -- see the comments on
+    _TERMINAL_BG_TARGET_LUMINANCE_LIGHT/_DARK and
+    _TERMINAL_BG_SATURATION_CAP_LIGHT/_DARK for why a flat HSL
+    lightness (or one shared saturation cap) can't hit either target
+    consistently on its own."""
     base_r, base_g, base_b = _hex_to_rgb01(project_color(name))
     hue, _lightness, saturation = colorsys.rgb_to_hls(base_r, base_g, base_b)
-    saturation = min(saturation, _TERMINAL_BG_SATURATION_CAP)
+    saturation = min(saturation, _TERMINAL_BG_SATURATION_CAP_DARK if dark else _TERMINAL_BG_SATURATION_CAP_LIGHT)
     target = _TERMINAL_BG_TARGET_LUMINANCE_DARK if dark else _TERMINAL_BG_TARGET_LUMINANCE_LIGHT
     lightness = _lightness_for_target_luminance(hue, saturation, target)
     r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)

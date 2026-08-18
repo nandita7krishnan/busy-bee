@@ -158,37 +158,25 @@ def prune_colored_ttys(live_ttys: set[str]) -> None:
     _colored_ttys.intersection_update(live_ttys)
 
 
-def _is_dark_tab(window_id: str, tab_index: str) -> bool:
-    """Reads the tab's foreground *text* color, not its background, to
-    decide whether it's running a light or dark theme. Background is
-    the wrong signal to read: it's exactly what this module itself
-    repaints, so on any tab already tinted in an earlier run (which by
-    now is most long-lived ones) it just reflects our own previous
-    guess, not the tab's real native theme -- self-poisoning, and
-    confirmed live: every currently-open tab's foreground turned out to
-    be white (a dark theme) while every one of their backgrounds had
-    already been overwritten light by an earlier pass, so a
-    background-based check could never detect dark again once applied
-    once. Foreground color is something this module never touches, so
-    it stays a reliable signal either way: bright/white text implies a
-    profile built for a dark background, dark/black text implies one
-    built for a light background."""
-    script = f"""
-tell application "Terminal"
-    normal text color of tab {tab_index} of (first window whose id is {window_id})
-end tell
-"""
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    if result.returncode != 0:
-        return False
-    parts = result.stdout.strip().split(", ")
-    if len(parts) != 3:
-        return False
-    try:
-        r, g, b = (int(p) / 65535 for p in parts)
-    except ValueError:
-        return False
-    return colors._relative_luminance((r, g, b)) > 0.5
+def _system_is_dark_mode() -> bool:
+    """Whether macOS itself is currently in Dark Mode.
+
+    Two per-tab signals were tried and rejected before this: the tab's
+    *background* color self-poisons (it's exactly what this module
+    repaints, so on any tab already tinted in an earlier run -- most
+    long-lived ones -- it just reads back our own previous guess).
+    Its *foreground* text color avoids that, but turned out to be a
+    static Terminal profile setting, not tied to appearance at all --
+    confirmed live: every open tab reported white foreground text
+    regardless of whether the system was actually in light or dark
+    mode, so that check would call every tab "dark" permanently. The
+    system's own current appearance is the one signal that actually
+    reflects light/dark *now*, rather than a fixed per-profile
+    property that says the same thing regardless."""
+    result = subprocess.run(
+        ["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True
+    )
+    return result.returncode == 0 and result.stdout.strip() == "Dark"
 
 
 def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
@@ -205,17 +193,16 @@ def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
     full-saturation card color made Claude Code's own text hard to
     read. The darkened variant keeps the same hue (still visually ties
     the tab to its card) at a background-appropriate lightness, light
-    or dark depending on what that particular tab's foreground text
-    color implies (see _is_dark_tab) -- checked per-tab, not once per
-    project, since two Terminal windows for the same project could
-    each be on a different profile."""
+    or dark depending on the system's current appearance (see
+    _system_is_dark_mode) -- checked once per call, not per tab, since
+    it's a single system-wide setting."""
+    dark = _system_is_dark_mode()
     for tty in live_ttys:
         if tty in _colored_ttys:
             continue
         tab = _find_tab_by_tty(tty)
         if tab is None:
             continue
-        dark = _is_dark_tab(tab["window_id"], tab["tab_index"])
         color = colors.terminal_background_color(project_name, dark=dark)
         color_tab(tab["window_id"], tab["tab_index"], color)
         _colored_ttys.add(tty)

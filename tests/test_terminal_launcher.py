@@ -180,7 +180,7 @@ def test_sync_session_colors_colors_each_live_tty_once(monkeypatch):
     tl._colored_ttys.clear()
     colored = []
     monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: {"window_id": "9", "tab_index": "1"})
-    monkeypatch.setattr(tl, "_is_dark_tab", lambda wid, idx: False)
+    monkeypatch.setattr(tl, "_system_is_dark_mode", lambda: False)
     monkeypatch.setattr(tl, "color_tab", lambda wid, idx, color: colored.append((wid, idx, color)))
 
     tl.sync_session_colors("my-project", ["ttys002"])
@@ -194,7 +194,7 @@ def test_sync_session_colors_skips_ttys_with_no_matching_tab(monkeypatch):
     tl._colored_ttys.clear()
     colored = []
     monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: None)
-    monkeypatch.setattr(tl, "_is_dark_tab", lambda wid, idx: False)
+    monkeypatch.setattr(tl, "_system_is_dark_mode", lambda: False)
     monkeypatch.setattr(tl, "color_tab", lambda wid, idx, color: colored.append(color))
 
     tl.sync_session_colors("my-project", ["ttys999"])
@@ -203,11 +203,11 @@ def test_sync_session_colors_skips_ttys_with_no_matching_tab(monkeypatch):
     assert "ttys999" not in tl._colored_ttys
 
 
-def test_sync_session_colors_uses_dark_variant_for_a_dark_tab(monkeypatch):
+def test_sync_session_colors_uses_dark_variant_when_system_is_dark(monkeypatch):
     tl._colored_ttys.clear()
     colored = []
     monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: {"window_id": "9", "tab_index": "1"})
-    monkeypatch.setattr(tl, "_is_dark_tab", lambda wid, idx: True)
+    monkeypatch.setattr(tl, "_system_is_dark_mode", lambda: True)
     monkeypatch.setattr(tl, "color_tab", lambda wid, idx, color: colored.append(color))
 
     tl.sync_session_colors("my-project", ["ttys002"])
@@ -215,25 +215,17 @@ def test_sync_session_colors_uses_dark_variant_for_a_dark_tab(monkeypatch):
     assert colored == [tl.colors.terminal_background_color("my-project", dark=True)]
 
 
-def test_is_dark_tab_true_for_a_near_white_foreground(monkeypatch):
-    # White/bright text implies a profile built for a dark background.
-    monkeypatch.setattr(
-        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="63000, 63000, 63000\n")
-    )
-    assert tl._is_dark_tab("9", "1") is True
+def test_system_is_dark_mode_true_when_defaults_reports_dark(monkeypatch):
+    monkeypatch.setattr(tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="Dark\n"))
+    assert tl._system_is_dark_mode() is True
 
 
-def test_is_dark_tab_false_for_a_near_black_foreground(monkeypatch):
-    # Dark/black text implies a profile built for a light background.
-    monkeypatch.setattr(
-        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="2000, 2000, 2000\n")
-    )
-    assert tl._is_dark_tab("9", "1") is False
-
-
-def test_is_dark_tab_false_when_applescript_fails(monkeypatch):
+def test_system_is_dark_mode_false_when_key_is_unset(monkeypatch):
+    # `defaults read` exits non-zero when the key doesn't exist at all
+    # -- the normal state in light mode, since macOS only sets
+    # AppleInterfaceStyle when dark mode is on.
     monkeypatch.setattr(tl.subprocess, "run", lambda *a, **k: FakeResult(returncode=1))
-    assert tl._is_dark_tab("9", "1") is False
+    assert tl._system_is_dark_mode() is False
 
 
 def test_prune_colored_ttys_drops_dead_ttys():
