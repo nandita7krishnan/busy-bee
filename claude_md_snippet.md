@@ -7,7 +7,18 @@ missing, skip the rest of this section and mention it in your response
 once. No setup is needed beyond that -- the current directory
 auto-registers itself the first time any command below runs.
 
-Log status as you work, using one-line, plain-language descriptions:
+Log status as you work, using one-line, plain-language descriptions.
+**Keep every line short -- aim for under 12 words, one clause, no
+sub-clauses.** The dashboard has limited space and these are meant to
+be scannable at a glance, not a changelog entry. If what you did needs
+more than one clause to explain, log the outcome only and leave the
+reasoning/detail out -- it's in your own conversation already.
+
+  - Good: `dashctl done "fixed the login redirect loop"`
+  - Too verbose: `dashctl done "found and fixed a bug where the login
+    redirect loop was caused by a stale session cookie not being
+    cleared on logout, which I traced through the auth middleware and
+    fixed by adding an explicit cookie expiry"`
 
 - Finished a task: `dashctl done "<what you finished>"`
 - Identified upcoming work: `dashctl todo "<what's next>"` (note its
