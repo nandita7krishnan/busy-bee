@@ -20,19 +20,20 @@ PROJECT_COLORS = [
     "#8e9b1f",
 ]
 
-# Went through two dark/medium attempts (HSL L=0.14, then 0.22 -- both
-# still read as "too dark", and inconsistently so across hues, since
-# HSL lightness doesn't track perceived brightness -- see the luminance
-# comment on _lightness_for_target_luminance). Direct feedback then
-# reframed the actual goal: Claude Code's own text already reads well
-# on a plain white background, and its many different text colors
-# (white/gray/blue links/etc.) were never going to all have good
-# contrast against any one mid-brightness color anyway. So instead of
-# hunting for a "dark theme that works," target a pale, near-white tint
-# instead -- barely-there color on top of what's essentially still a
-# white background, still enough to tell projects apart at a glance.
-_TERMINAL_BG_TARGET_LUMINANCE = 0.90
-_TERMINAL_BG_SATURATION_CAP = 0.18
+# Went through several attempts: HSL L=0.14 and 0.22 (too dark, and
+# inconsistently so across hues -- HSL lightness doesn't track
+# perceived brightness, see the luminance comment on
+# _lightness_for_target_luminance); then a very pale near-white
+# (target luminance 0.90, saturation capped at 0.18) that fixed
+# readability but overcorrected -- capped that low, different projects'
+# pastels were nearly indistinguishable from each other and from plain
+# white, defeating the point (also supposed to visibly tie back to the
+# project's own dashboard card color). This is the balance: still a
+# light, readable pastel (not a dark theme fighting Claude Code's many
+# text colors), but saturated enough that each project's hue is
+# clearly distinct and clearly related to its vivid dashboard accent.
+_TERMINAL_BG_TARGET_LUMINANCE = 0.85
+_TERMINAL_BG_SATURATION_CAP = 0.55
 
 
 def _hex_to_rgb01(hex_color: str) -> tuple[float, float, float]:
