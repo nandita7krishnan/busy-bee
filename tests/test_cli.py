@@ -25,6 +25,24 @@ def test_done_and_todo_logged(tmp_path, monkeypatch, capsys):
     assert status_file.exists()
 
 
+def test_log_nudges_toward_conciseness_without_blocking(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    long_text = " ".join(["word"] * 20)
+    assert cli.main(["done", long_text]) == 0  # doesn't fail the command
+
+    out = capsys.readouterr()
+    assert f"logged done: {long_text}" in out.out  # full text still logged, not truncated
+    assert "tip:" in out.err
+    assert "20 words" in out.err
+
+
+def test_log_stays_quiet_when_concise(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    cli.main(["done", "shipped it"])
+    err = capsys.readouterr().err
+    assert err == ""
+
+
 def test_todo_then_resolve(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     cli.main(["todo", "write docs"])

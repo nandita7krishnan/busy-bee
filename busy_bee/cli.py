@@ -64,6 +64,15 @@ def _auto_register(root: Path) -> None:
 
 _LOG_TYPES = ("done", "todo", "blocker", "question", "summary")
 
+# Matches the "aim for under 12 words" guidance in claude_md_snippet.md.
+# A soft nudge, not a hard limit -- prompt wording alone wasn't enough
+# (plenty of long entries got logged despite the instructions already
+# saying "one-line, plain-language"), but truncating or rejecting the
+# text outright would lose information a human might actually want in
+# the full-text tooltip. This just makes the ask visible at the moment
+# it's easy to fix, without blocking the command.
+_CONCISE_WORD_LIMIT = 12
+
 
 def cmd_log(item_type: str, text: str) -> int:
     root = _project_root()
@@ -73,6 +82,15 @@ def cmd_log(item_type: str, text: str) -> int:
         print(f"logged {item_type} [{item['id']}]: {text}")
     else:
         print(f"logged {item_type}: {text}")
+
+    word_count = len(text.split())
+    if word_count > _CONCISE_WORD_LIMIT:
+        print(
+            f"tip: that's {word_count} words -- the dashboard shows these in a small "
+            f"card and truncates long entries. Aim for under {_CONCISE_WORD_LIMIT} "
+            "next time (the outcome, not the explanation).",
+            file=sys.stderr,
+        )
     return 0
 
 
