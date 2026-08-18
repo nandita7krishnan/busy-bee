@@ -23,10 +23,14 @@ PROJECT_COLORS = [
 # How dark/desaturated a terminal background needs to be to stay out of
 # the way of Claude Code's own text colors (calibrated for a near-black
 # or near-white background, not an arbitrary bright one). Chosen and
-# checked against real screenshots of Claude Code's actual text colors
-# on top of each swatch -- see terminal_background_color.
-_TERMINAL_BG_LIGHTNESS = 0.14
-_TERMINAL_BG_SATURATION_CAP = 0.38
+# checked against rendered swatches with sample text approximating
+# Claude Code's own colors (white/gray/blue) -- see
+# terminal_background_color. 0.14 (first attempt) read as too dark per
+# direct feedback; 0.22 keeps the same readability margin on every
+# palette hue while noticeably lighter -- 0.28+ starts losing contrast
+# on the muted/secondary text color specifically on the warmer hues.
+_TERMINAL_BG_LIGHTNESS = 0.22
+_TERMINAL_BG_SATURATION_CAP = 0.42
 
 
 def _hex_to_rgb01(hex_color: str) -> tuple[float, float, float]:
