@@ -10,12 +10,12 @@ from __future__ import annotations
 import colorsys
 
 # Index 0-2 chosen deliberately (pink, blue, purple) per explicit
-# request; the rest kept in their prior relative order. The old index-4
-# magenta (#e84393) was dropped rather than kept alongside the new pink
-# -- the two were close enough in hue to undercut the "each project is
-# clearly distinct" goal this list exists for.
+# request. First pass used a new #ff6f91 for "pink" and dropped the
+# original #e84393 magenta as a near-duplicate -- turned out #ff6f91
+# read as more of a mauve/purple in practice, and #e84393 was the
+# color meant by "pink" all along. Restored it, moved to the front.
 PROJECT_COLORS = [
-    "#ff6f91",
+    "#e84393",
     "#5b8def",
     "#9b59b6",
     "#16a085",

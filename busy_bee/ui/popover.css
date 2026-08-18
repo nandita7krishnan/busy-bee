@@ -12,7 +12,7 @@
   /* Per-project identity colors -- picked away from --coral/--amber so
      a project's own color is never mistaken for a blocker/question
      badge, which are the actual "needs attention" signal. */
-  --proj-0: #ff6f91;
+  --proj-0: #e84393;
   --proj-1: #5b8def;
   --proj-2: #9b59b6;
   --proj-3: #16a085;

@@ -156,10 +156,10 @@ class Api:
         # file genuinely existing. data: URIs aren't subject to that
         # origin restriction.
         count = db.count_all_unresolved_blockers_and_questions()
-        # Kept proportional to WIDGET_SIZE (3x the original 96, plus
-        # the same ~1.33x headroom the original 128-for-96 ratio had
-        # for a crisp, non-blurry render at the window's actual size).
-        path = icon.render_widget_icon(count, size=384)
+        # Kept proportional to WIDGET_SIZE, plus the same ~1.33x
+        # headroom the original 128-for-96 ratio had for a crisp,
+        # non-blurry render at the window's actual size.
+        path = icon.render_widget_icon(count, size=326)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
 
@@ -256,7 +256,7 @@ def _on_webview_loop_started(app: BusyBeeApp) -> None:
     AppHelper.callAfter(_start_rumps_setup_without_blocking, app)
 
 
-WIDGET_SIZE = 288  # 3x the original 96 -- on request, the floating bee was too small to read at a glance
+WIDGET_SIZE = 245  # 3x the original 96, then -15% on request (the 3x pass ran a bit too large)
 
 
 def main() -> None:
