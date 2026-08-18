@@ -32,7 +32,14 @@ def _draw_bee(image, size: float) -> None:
     import AppKit
     import Foundation
 
-    font = AppKit.NSFont.systemFontOfSize_(size * 0.72)
+    # 0.72 (original) left too little internal margin: an emoji glyph's
+    # actual ink (antennae, legs, wings) extends beyond the font's
+    # nominal metrics box, and on top of that the badge (see
+    # _draw_badge) visually overlaps the top-right quadrant where the
+    # antennae are -- found by actually looking at the composited
+    # render with a badge, not just the bare bee alone, which is what
+    # earlier verification had checked. 0.60 leaves real headroom.
+    font = AppKit.NSFont.systemFontOfSize_(size * 0.60)
     attrs = {AppKit.NSFontAttributeName: font}
     text = Foundation.NSString.stringWithString_(_BEE)
     text_size = text.sizeWithAttributes_(attrs)
@@ -46,9 +53,27 @@ def _draw_badge(image, size: float, count: int) -> None:
     import AppKit
     import Foundation
 
+    # 0.5 (half the entire icon's diameter!) visually swallowed the
+    # bee's head/antennae in the top-right quadrant where both the bee
+    # art and the badge naturally sit -- confirmed by looking directly
+    # at the composited render, not just checking the bee and badge
+    # each render correctly in isolation. 0.34 is proportioned closer
+    # to how macOS's own Dock badges relate to the icon behind them.
     label = str(count) if count < 100 else "99+"
-    diameter = size * 0.5
-    rect = Foundation.NSMakeRect(size - diameter, size - diameter, diameter, diameter)
+    diameter = size * 0.34
+    # The white halo below expands *outward* from this rect by 8% of
+    # the diameter -- placing the badge flush against the corner (no
+    # margin) meant that expansion had nowhere to go and got clipped
+    # by the canvas edge. Pixel-scanned the actual rendered PNG's alpha
+    # channel to confirm: non-transparent content touched x=size-1 and
+    # y=0 exactly, a hard cut, not a rendering artifact. Margin here
+    # needs to exceed the halo's 8% expansion; using 12% for headroom.
+    margin = diameter * 0.16 + 1.5  # flat pixel term so it survives
+    # rounding at the tray icon's much smaller render size (44pt vs the
+    # widget's 128pt) -- a purely proportional margin was eaten by
+    # antialiasing/rounding at that scale even though the same fraction
+    # left comfortable margin at the larger size.
+    rect = Foundation.NSMakeRect(size - diameter - margin, size - diameter - margin, diameter, diameter)
 
     AppKit.NSColor.whiteColor().setFill()
     AppKit.NSBezierPath.bezierPathWithOvalInRect_(
