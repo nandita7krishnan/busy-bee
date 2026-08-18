@@ -239,3 +239,15 @@ def test_get_project_ttys_orders_by_most_recent_activity():
 def test_get_project_ttys_ignores_items_without_a_tty():
     db.upsert_item("p1", "done", "no tty", "2026-08-14T10:00:00+00:00", None, "agent", "a1")
     assert db.get_project_ttys("p1") == []
+
+
+def test_get_latest_summary_for_tty_returns_most_recent():
+    db.upsert_item("p1", "summary", "first pass done", "2026-08-14T10:00:00+00:00", None, "agent", "s1", terminal_tty="ttys001")
+    db.upsert_item("p1", "summary", "wrapping up now", "2026-08-14T10:05:00+00:00", None, "agent", "s2", terminal_tty="ttys001")
+    db.upsert_item("p1", "summary", "unrelated session", "2026-08-14T10:06:00+00:00", None, "agent", "s3", terminal_tty="ttys002")
+
+    assert db.get_latest_summary_for_tty("p1", "ttys001") == "wrapping up now"
+
+
+def test_get_latest_summary_for_tty_none_when_unlogged():
+    assert db.get_latest_summary_for_tty("p1", "ttys001") is None

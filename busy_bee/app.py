@@ -66,13 +66,19 @@ class Api:
             sessions = [
                 {
                     "tty": tty,
-                    # Claude Code auto-titles its Terminal tab with a
-                    # summary of that conversation -- a far more useful
-                    # label than "Session 1", "Session 2". Falls back to
-                    # the tty itself if the tab has no title yet (or
-                    # isn't Terminal.app), so the UI always has *some*
-                    # stable per-session label to key off of.
-                    "name": terminal_launcher.session_title_for_tty(tty) or tty,
+                    # Prefer the agent's own `dashctl summary` for this
+                    # session -- a far more useful label than "Session
+                    # 1", and more accurate than Claude Code's
+                    # auto-generated Terminal tab title, which is set
+                    # once early on and often drifts from what the
+                    # session ends up actually being about. Falls back
+                    # to that tab title, then the tty itself, so the UI
+                    # always has *some* stable per-session label.
+                    "name": (
+                        db.get_latest_summary_for_tty(p["name"], tty)
+                        or terminal_launcher.session_title_for_tty(tty)
+                        or tty
+                    ),
                     "done": [row["text"] for row in db.get_recent_done(p["name"], terminal_tty=tty)],
                     "todo": [row["text"] for row in db.get_next_todo(p["name"], terminal_tty=tty)],
                 }
@@ -150,7 +156,10 @@ class Api:
         # file genuinely existing. data: URIs aren't subject to that
         # origin restriction.
         count = db.count_all_unresolved_blockers_and_questions()
-        path = icon.render_widget_icon(count)
+        # Kept proportional to WIDGET_SIZE (3x the original 96, plus
+        # the same ~1.33x headroom the original 128-for-96 ratio had
+        # for a crisp, non-blurry render at the window's actual size).
+        path = icon.render_widget_icon(count, size=384)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
 
@@ -247,7 +256,7 @@ def _on_webview_loop_started(app: BusyBeeApp) -> None:
     AppHelper.callAfter(_start_rumps_setup_without_blocking, app)
 
 
-WIDGET_SIZE = 96
+WIDGET_SIZE = 288  # 3x the original 96 -- on request, the floating bee was too small to read at a glance
 
 
 def main() -> None:

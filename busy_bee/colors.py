@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import colorsys
 
+# Index 0-2 chosen deliberately (pink, blue, purple) per explicit
+# request; the rest kept in their prior relative order. The old index-4
+# magenta (#e84393) was dropped rather than kept alongside the new pink
+# -- the two were close enough in hue to undercut the "each project is
+# clearly distinct" goal this list exists for.
 PROJECT_COLORS = [
+    "#ff6f91",
     "#5b8def",
     "#9b59b6",
     "#16a085",
     "#e67e22",
-    "#e84393",
     "#00b8d9",
     "#6c5ce7",
     "#8e9b1f",
@@ -28,11 +33,11 @@ PROJECT_COLORS = [
 # readability but overcorrected -- capped that low, different projects'
 # pastels were nearly indistinguishable from each other and from plain
 # white, defeating the point (also supposed to visibly tie back to the
-# project's own dashboard card color). This is the balance: still a
-# light, readable pastel (not a dark theme fighting Claude Code's many
-# text colors), but saturated enough that each project's hue is
-# clearly distinct and clearly related to its vivid dashboard accent.
-_TERMINAL_BG_TARGET_LUMINANCE = 0.85
+# project's own dashboard card color). Landed on 0.85/0.55 as the
+# balance, then nudged to 0.88 on request for a touch lighter still --
+# checked the 0.55 saturation cap still keeps all 8 hues visibly
+# distinct at 0.88 before landing here.
+_TERMINAL_BG_TARGET_LUMINANCE = 0.88
 _TERMINAL_BG_SATURATION_CAP = 0.55
 
 

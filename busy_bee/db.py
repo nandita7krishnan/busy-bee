@@ -199,6 +199,21 @@ def get_next_todo(project: str, limit: int = 3, terminal_tty: str | None = None)
         ).fetchall()
 
 
+def get_latest_summary_for_tty(project: str, terminal_tty: str) -> str | None:
+    """The most recently logged `dashctl summary` text for this
+    specific terminal session, if any -- a better session label than
+    Claude Code's own auto-generated Terminal tab title, since that
+    title is chosen once early in the conversation and often drifts
+    from what the session actually ends up being about."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT text FROM items WHERE project = ? AND type = 'summary' AND terminal_tty = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (project, terminal_tty),
+        ).fetchone()
+        return row["text"] if row else None
+
+
 def get_project_ttys(project: str) -> list[str]:
     """Every tty that has ever logged an item for this project, most
     recently active first -- callers intersect this with currently-live
