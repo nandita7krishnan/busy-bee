@@ -63,6 +63,22 @@ class Api:
             # closed session's block disappears on the very next poll
             # instead of lingering.
             live_session_ttys = [t for t in db.get_project_ttys(p["name"]) if t in live_ttys]
+
+            # Fetched once per project, then split by tty below -- each
+            # blocker/question already carries the tty that logged it,
+            # so it can attach to that specific session's card instead
+            # of the whole project. Anything whose tty isn't a currently
+            # live session (no session block to attach to) falls back
+            # to the project-level badge so it's never dropped.
+            blockers_all = [
+                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
+                for row in db.get_unresolved(p["name"], "blocker")
+            ]
+            questions_all = [
+                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
+                for row in db.get_unresolved(p["name"], "question")
+            ]
+
             sessions = [
                 {
                     "tty": tty,
@@ -81,6 +97,8 @@ class Api:
                     ),
                     "done": [row["text"] for row in db.get_recent_done(p["name"], terminal_tty=tty)],
                     "todo": [row["text"] for row in db.get_next_todo(p["name"], terminal_tty=tty)],
+                    "blockers": [b for b in blockers_all if b["tty"] == tty],
+                    "questions": [q for q in questions_all if q["tty"] == tty],
                 }
                 for tty in live_session_ttys
             ]
@@ -94,14 +112,8 @@ class Api:
                 done = [row["text"] for row in db.get_recent_done(p["name"])]
                 todo = [row["text"] for row in db.get_next_todo(p["name"])]
 
-            blockers = [
-                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
-                for row in db.get_unresolved(p["name"], "blocker")
-            ]
-            questions = [
-                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
-                for row in db.get_unresolved(p["name"], "question")
-            ]
+            blockers = [b for b in blockers_all if b["tty"] not in live_session_ttys]
+            questions = [q for q in questions_all if q["tty"] not in live_session_ttys]
             result.append(
                 {
                     "name": p["name"],

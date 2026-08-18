@@ -43,23 +43,39 @@ function renderFlagLine(item, type) {
     <div class="flag-line ${type}" data-open-terminal${ttyAttr}>
       <span class="dot"></span>
       <span class="item-text">${escapeHtml(item.text)}</span>
-      <span class="goto-terminal">open →</span>
     </div>
   `;
 }
 
 function renderSession(session, index) {
+  const sessionBlockers = session.blockers || [];
+  const sessionQuestions = session.questions || [];
+  const hasFlags = sessionBlockers.length > 0 || sessionQuestions.length > 0;
+
+  const badges = [
+    sessionBlockers.length ? `<span class="badge blocker">${sessionBlockers.length}</span>` : "",
+    sessionQuestions.length ? `<span class="badge question">${sessionQuestions.length}</span>` : "",
+  ].join("");
+
+  const flagsHtml = hasFlags
+    ? `<div class="flags">
+        ${sessionBlockers.map((b) => renderFlagLine(b, "blocker")).join("")}
+        ${sessionQuestions.map((q) => renderFlagLine(q, "question")).join("")}
+      </div>`
+    : "";
+
   return `
     <div class="session-block">
       <div class="session-header" data-open-terminal data-tty="${escapeHtml(session.tty)}">
         <span class="live-dot"></span>
         <span class="session-label" title="${escapeHtml(session.name || `Session ${index + 1}`)}">${escapeHtml(session.name || `Session ${index + 1}`)}</span>
-        <span class="goto-terminal">open →</span>
+        ${badges}
       </div>
       <div class="session-columns">
         ${renderColumn("Done", session.done, "done", "nothing yet")}
         ${renderColumn("Next", session.todo, "todo", "nothing queued")}
       </div>
+      ${flagsHtml}
     </div>
   `;
 }

@@ -25,19 +25,27 @@ PROJECT_COLORS = [
     "#8e9b1f",
 ]
 
-# Went through several attempts: HSL L=0.14 and 0.22 (too dark, and
-# inconsistently so across hues -- HSL lightness doesn't track
-# perceived brightness, see the luminance comment on
-# _lightness_for_target_luminance); then a very pale near-white
-# (target luminance 0.90, saturation capped at 0.18) that fixed
-# readability but overcorrected -- capped that low, different projects'
-# pastels were nearly indistinguishable from each other and from plain
-# white, defeating the point (also supposed to visibly tie back to the
-# project's own dashboard card color). Landed on 0.85/0.55 as the
-# balance, then nudged to 0.88 on request for a touch lighter still --
-# checked the 0.55 saturation cap still keeps all 8 hues visibly
-# distinct at 0.88 before landing here.
-_TERMINAL_BG_TARGET_LUMINANCE = 0.88
+# Went through several attempts for the light-mode target: HSL L=0.14
+# and 0.22 (too dark, and inconsistently so across hues -- HSL
+# lightness doesn't track perceived brightness, see the luminance
+# comment on _lightness_for_target_luminance); then a very pale
+# near-white (target luminance 0.90, saturation capped at 0.18) that
+# fixed readability but overcorrected -- capped that low, different
+# projects' pastels were nearly indistinguishable from each other and
+# from plain white, defeating the point (also supposed to visibly tie
+# back to the project's own dashboard card color). 0.55 saturation
+# fixed that; luminance itself nudged lighter twice more since (0.85 ->
+# 0.88 -> 0.92) chasing "closer to white" while re-checking each time
+# that 0.55 saturation still keeps all 8 hues visibly distinct.
+_TERMINAL_BG_TARGET_LUMINANCE_LIGHT = 0.92
+# The dark-mode target isn't a guess in isolation -- it's the *same*
+# 0.14-0.22 range that read as "too dark" earlier, which only failed
+# because it was being applied to a terminal actually running a light
+# theme (light background, dark text): forcing a near-black perceived
+# brightness onto that clashed. Applied only when the terminal itself
+# is in dark mode (light text, calibrated for a dark background), the
+# same low-luminance tint is the right target, not a mistake to avoid.
+_TERMINAL_BG_TARGET_LUMINANCE_DARK = 0.16
 _TERMINAL_BG_SATURATION_CAP = 0.55
 
 
@@ -74,21 +82,25 @@ def project_color(name: str) -> str:
     return PROJECT_COLORS[h % len(PROJECT_COLORS)]
 
 
-def terminal_background_color(name: str) -> str:
-    """A pale, barely-there tint of the project's color, for use as a
-    full Terminal tab background. The vivid PROJECT_COLORS work fine as
-    a thin accent (the popover card's left border), but are far too
-    saturated/bright to paint an entire terminal background with, and
-    even a darkened/desaturated variant fights with Claude Code's many
-    different text colors, which are calibrated for a plain white
-    background. Keeps the same hue (still visually ties the tab to its
-    dashboard card), heavily capped saturation, and a lightness solved
-    per-hue to hit a consistent target *perceived* brightness near
-    white -- see the comment on _TERMINAL_BG_TARGET_LUMINANCE for why a
-    flat HSL lightness doesn't do that on its own."""
+def terminal_background_color(name: str, dark: bool = False) -> str:
+    """A tint of the project's color, for use as a full Terminal tab
+    background. The vivid PROJECT_COLORS work fine as a thin accent
+    (the popover card's left border), but are far too saturated/bright
+    to paint an entire terminal background with, and even a
+    darkened/desaturated variant fights with Claude Code's own text
+    colors -- which are calibrated for whichever background the
+    terminal is actually running against. Keeps the same hue (still
+    visually ties the tab to its dashboard card) and heavily capped
+    saturation either way; only the target *perceived* brightness
+    flips, to a pale near-white tint for a light-background terminal
+    (dark=False, the default) or a dark near-black tint for a
+    dark-background one (dark=True) -- see the comments on
+    _TERMINAL_BG_TARGET_LUMINANCE_LIGHT/_DARK for why a flat HSL
+    lightness can't hit either target consistently on its own."""
     base_r, base_g, base_b = _hex_to_rgb01(project_color(name))
     hue, _lightness, saturation = colorsys.rgb_to_hls(base_r, base_g, base_b)
     saturation = min(saturation, _TERMINAL_BG_SATURATION_CAP)
-    lightness = _lightness_for_target_luminance(hue, saturation, _TERMINAL_BG_TARGET_LUMINANCE)
+    target = _TERMINAL_BG_TARGET_LUMINANCE_DARK if dark else _TERMINAL_BG_TARGET_LUMINANCE_LIGHT
+    lightness = _lightness_for_target_luminance(hue, saturation, target)
     r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
     return _rgb01_to_hex((r, g, b))
