@@ -21,16 +21,28 @@ def test_terminal_background_color_is_deterministic():
     )
 
 
-def test_terminal_background_color_is_dark():
-    # The whole point: readable as a full-screen background, unlike
-    # the vivid card-accent palette it's derived from.
+def test_terminal_background_color_hits_target_luminance_consistently():
+    # The actual point: every hue in the palette should read as
+    # *equally* bright, not just "dark enough somewhere" -- a flat HSL
+    # lightness target doesn't do that (blue contributes far less to
+    # perceived brightness than green at the same HSL-L), which is
+    # exactly what made busy-bee's blue-purple look noticeably darker
+    # than proj-c's yellow-green at a supposedly identical setting.
+    names = ["proj-0", "proj-1", "proj-2", "proj-3", "proj-4", "proj-5", "proj-6", "proj-7"]
+    for name in names:
+        hex_color = colors.terminal_background_color(name)
+        r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5))
+        luminance = colors._relative_luminance((r, g, b))
+        assert abs(luminance - colors._TERMINAL_BG_TARGET_LUMINANCE) < 0.02
+
+
+def test_terminal_background_color_caps_saturation():
     import colorsys
 
     for name in ("busy-bee", "social-media-optimizer", "some-other-project"):
         hex_color = colors.terminal_background_color(name)
         r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5))
-        _, lightness, saturation = colorsys.rgb_to_hls(r, g, b)
-        assert lightness < 0.25
+        _, _lightness, saturation = colorsys.rgb_to_hls(r, g, b)
         # Small tolerance for 8-bit RGB rounding on the way back from
         # the capped HLS value -- not perfectly reversible.
         assert saturation <= colors._TERMINAL_BG_SATURATION_CAP + 0.01
