@@ -131,7 +131,14 @@ def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
     visual cue for which project a given terminal window belongs to.
     No-ops for ttys already colored this run, or that aren't an actual
     Terminal.app tab (iTerm isn't scriptable the same way here, and a
-    dead tty has no window to find)."""
+    dead tty has no window to find).
+
+    Uses terminal_background_color, not the vivid project_color used
+    for the popover card's border accent -- confirmed via a real
+    screenshot that painting the *entire* terminal background with the
+    full-saturation card color made Claude Code's own text hard to
+    read. The darkened variant keeps the same hue (still visually ties
+    the tab to its card) at a background-appropriate lightness."""
     color = None
     for tty in live_ttys:
         if tty in _colored_ttys:
@@ -140,7 +147,7 @@ def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
         if tab is None:
             continue
         if color is None:
-            color = colors.project_color(project_name)
+            color = colors.terminal_background_color(project_name)
         color_tab(tab["window_id"], tab["tab_index"], color)
         _colored_ttys.add(tty)
 

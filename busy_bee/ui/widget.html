@@ -16,11 +16,17 @@
       justify-content: center;
     }
 
-    /* Icon is sized smaller than the window so the float animation
-       has room to move without clipping against the window edge. */
+    /* Icon is sized well below 100% of the window so the float
+       animation (translate + rotate) has real room to move without
+       clipping against the window edge (overflow: hidden on body) --
+       80% was tried first and still clipped: rotating a ~77px box a
+       few degrees around an off-center pivot swings its top corner
+       several px sideways, on top of the translateY, which used up
+       more than the ~9.5px margin 80% left on each side. 62% leaves
+       roughly double that. */
     #icon {
-      width: 80%;
-      height: 80%;
+      width: 62%;
+      height: 62%;
       display: block;
       cursor: pointer;
       -webkit-user-select: none;
@@ -32,9 +38,9 @@
 
     @keyframes bee-float {
       0%, 100% { transform: translateY(0) rotate(0deg); }
-      25%      { transform: translateY(-4px) rotate(-7deg); }
+      25%      { transform: translateY(-3px) rotate(-5deg); }
       50%      { transform: translateY(-1px) rotate(0deg); }
-      75%      { transform: translateY(-4px) rotate(7deg); }
+      75%      { transform: translateY(-3px) rotate(5deg); }
     }
 
     @media (prefers-reduced-motion: reduce) {
