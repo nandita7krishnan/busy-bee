@@ -23,6 +23,7 @@ from busy_bee.config import HOME_DIR
 
 PLAIN_ICON_PATH = HOME_DIR / "bee_icon.png"
 TRAY_ICON_DIR = HOME_DIR / "tray_icons"
+WIDGET_ICON_DIR = HOME_DIR / "widget_icons"
 
 _BEE = "🐝"
 
@@ -101,6 +102,16 @@ def render_plain_bee(size: int = 512) -> Path:
 
 def render_tray_icon(count: int, size: int = 44) -> Path:
     path = TRAY_ICON_DIR / f"tray_{count}.png"
+    if not path.exists():
+        _render(path, size, count)
+    return path
+
+
+def render_widget_icon(count: int, size: int = 128) -> Path:
+    """Separate from render_tray_icon: that one's cache key is `count`
+    alone (not size), so reusing it at a different size for the larger
+    floating widget would collide with the menu bar's cached file."""
+    path = WIDGET_ICON_DIR / f"widget_{count}.png"
     if not path.exists():
         _render(path, size, count)
     return path

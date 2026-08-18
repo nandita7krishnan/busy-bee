@@ -107,3 +107,55 @@ def test_resume_project_ignores_tty_for_iterm(tmp_path, monkeypatch):
     tl.resume_project(str(tmp_path), terminal_app="iTerm", tty="ttys002")
     assert len(calls) == 1
     assert "iTerm" in calls[0][2]
+
+
+def test_hex_to_terminal_rgb_scales_to_16_bit():
+    assert tl._hex_to_terminal_rgb("#ffffff") == (65535, 65535, 65535)
+    assert tl._hex_to_terminal_rgb("#000000") == (0, 0, 0)
+    assert tl._hex_to_terminal_rgb("#5b8def") == (0x5B * 257, 0x8D * 257, 0xEF * 257)
+
+
+def test_color_tab_issues_applescript_with_scaled_rgb(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+
+    tl.color_tab("9", "2", "#000000")
+
+    assert len(calls) == 1
+    script = calls[0][2]
+    assert "tab 2 of (first window whose id is 9)" in script
+    assert "{0, 0, 0}" in script
+
+
+def test_sync_session_colors_colors_each_live_tty_once(monkeypatch):
+    tl._colored_ttys.clear()
+    colored = []
+    monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: {"window_id": "9", "tab_index": "1"})
+    monkeypatch.setattr(tl, "color_tab", lambda wid, idx, color: colored.append((wid, idx, color)))
+
+    tl.sync_session_colors("my-project", ["ttys002"])
+    tl.sync_session_colors("my-project", ["ttys002"])  # second call should no-op
+
+    assert len(colored) == 1
+    assert colored[0][:2] == ("9", "1")
+
+
+def test_sync_session_colors_skips_ttys_with_no_matching_tab(monkeypatch):
+    tl._colored_ttys.clear()
+    colored = []
+    monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: None)
+    monkeypatch.setattr(tl, "color_tab", lambda wid, idx, color: colored.append(color))
+
+    tl.sync_session_colors("my-project", ["ttys999"])
+
+    assert colored == []
+    assert "ttys999" not in tl._colored_ttys
+
+
+def test_prune_colored_ttys_drops_dead_ttys():
+    tl._colored_ttys.clear()
+    tl._colored_ttys.update({"ttys001", "ttys002"})
+
+    tl.prune_colored_ttys({"ttys001"})
+
+    assert tl._colored_ttys == {"ttys001"}

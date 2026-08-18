@@ -37,7 +37,7 @@ import rumps
 import webview
 from PyObjCTools import AppHelper
 
-from busy_bee import aggregator, config, db, icon, terminal_launcher
+from busy_bee import aggregator, config, db, icon, process_utils, terminal_launcher
 
 UI_DIR = __file__.rsplit("/", 1)[0] + "/ui"
 
@@ -54,16 +54,39 @@ class Api:
 
     def get_projects(self) -> list[dict]:
         projects = db.get_projects()
+        live_ttys = process_utils.live_claude_ttys()
         result = []
         for p in projects:
-            done = [row["text"] for row in db.get_recent_done(p["name"])]
-            todo = [row["text"] for row in db.get_next_todo(p["name"])]
+            # A "session" only exists on the dashboard while its
+            # terminal actually has a claude process running -- tied to
+            # process state, not a time-since-last-log guess, so a
+            # closed session's block disappears on the very next poll
+            # instead of lingering.
+            live_session_ttys = [t for t in db.get_project_ttys(p["name"]) if t in live_ttys]
+            sessions = [
+                {
+                    "tty": tty,
+                    "done": [row["text"] for row in db.get_recent_done(p["name"], terminal_tty=tty)],
+                    "todo": [row["text"] for row in db.get_next_todo(p["name"], terminal_tty=tty)],
+                }
+                for tty in live_session_ttys
+            ]
+
+            if sessions:
+                # Broken out per-session below instead -- a flat
+                # cross-session list would interleave unrelated tasks
+                # from two agents into one confusing feed.
+                done, todo = [], []
+            else:
+                done = [row["text"] for row in db.get_recent_done(p["name"])]
+                todo = [row["text"] for row in db.get_next_todo(p["name"])]
+
             blockers = [
-                {"id": row["id"], "text": row["text"]}
+                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
                 for row in db.get_unresolved(p["name"], "blocker")
             ]
             questions = [
-                {"id": row["id"], "text": row["text"]}
+                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
                 for row in db.get_unresolved(p["name"], "question")
             ]
             result.append(
@@ -74,19 +97,20 @@ class Api:
                     "summary": p["last_summary"],
                     "done": done,
                     "todo": todo,
+                    "sessions": sessions,
                     "blockers": blockers,
                     "questions": questions,
                 }
             )
         return result
 
-    def open_terminal(self, project_name: str) -> None:
+    def open_terminal(self, project_name: str, tty: str | None = None) -> None:
         project = db.get_project(project_name)
         if project is None:
             return
         cfg = config.load_config()
         terminal_launcher.resume_project(
-            project["path"], cfg.get("terminal_app", "Terminal"), tty=project["terminal_tty"]
+            project["path"], cfg.get("terminal_app", "Terminal"), tty=tty or project["terminal_tty"]
         )
 
     def open_dashboard(self) -> None:
@@ -119,7 +143,7 @@ class Api:
         # file genuinely existing. data: URIs aren't subject to that
         # origin restriction.
         count = db.count_all_unresolved_blockers_and_questions()
-        path = icon.render_tray_icon(count)
+        path = icon.render_widget_icon(count)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
 
@@ -216,7 +240,7 @@ def _on_webview_loop_started(app: BusyBeeApp) -> None:
     AppHelper.callAfter(_start_rumps_setup_without_blocking, app)
 
 
-WIDGET_SIZE = 56
+WIDGET_SIZE = 96
 
 
 def main() -> None:

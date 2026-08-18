@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from busy_bee import config, db, project_store
+from busy_bee import config, db, process_utils, project_store, terminal_launcher
 
 ACTIVE_WINDOW = timedelta(minutes=30)
 
@@ -29,7 +29,7 @@ def derive_status(items: list[dict]) -> str:
     return "idle"
 
 
-def sync_project(name: str, path: str) -> None:
+def sync_project(name: str, path: str, live_ttys: frozenset[str] = frozenset()) -> None:
     root = Path(path)
     items = project_store.all_items(root)
     for item in items:
@@ -41,6 +41,7 @@ def sync_project(name: str, path: str) -> None:
             resolved_at=item["resolved_at"],
             source=item["source"],
             source_id=item["id"],
+            terminal_tty=item.get("terminal_tty"),
         )
     status = derive_status(items)
     terminal_tty = project_store.latest_terminal_tty(items)
@@ -49,15 +50,20 @@ def sync_project(name: str, path: str) -> None:
         name, str(root), status=status, terminal_tty=terminal_tty, last_summary=last_summary
     )
 
+    live_for_project = [t for t in db.get_project_ttys(name) if t in live_ttys]
+    terminal_launcher.sync_session_colors(name, live_for_project)
+
 
 def sync_all() -> int:
     """Runs one aggregation pass over every configured project. Returns
     the number of projects synced."""
     db.init_db()
     projects = config.list_projects()
+    live_ttys = process_utils.live_claude_ttys()
+    terminal_launcher.prune_colored_ttys(live_ttys)
     for p in projects:
         try:
-            sync_project(p["name"], p["path"])
+            sync_project(p["name"], p["path"], live_ttys=live_ttys)
         except FileNotFoundError:
             # project directory moved/deleted -- leave last-known state alone
             continue

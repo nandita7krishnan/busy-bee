@@ -48,3 +48,21 @@ def find_claude_ancestor_tty(max_hops: int = 20) -> str | None:
             return None
         pid = ppid
     return None
+
+
+def live_claude_ttys() -> set[str]:
+    """Every tty device name that currently has a running `claude`
+    process attached. Used to tell whether a previously-logged session
+    is still open or the terminal it ran in has since closed --
+    process state, not a time-since-last-log guess."""
+    result = subprocess.run(["ps", "-eo", "tty=,comm="], capture_output=True, text=True)
+    ttys: set[str] = set()
+    for line in result.stdout.splitlines():
+        tty, _, comm = line.strip().partition(" ")
+        tty = tty.strip()
+        comm = comm.strip()
+        if not tty or tty == "??":
+            continue
+        if comm.rsplit("/", 1)[-1] == "claude":
+            ttys.add(tty)
+    return ttys

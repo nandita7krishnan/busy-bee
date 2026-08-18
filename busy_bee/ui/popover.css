@@ -215,6 +215,61 @@ body {
   text-decoration: line-through;
 }
 
+.sessions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.session-block {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.session-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-columns .column {
+  flex: none;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 0 6px;
+}
+
+.session-header:hover .session-label { text-decoration: underline; }
+.session-header:hover .goto-terminal { color: var(--text); }
+
+.live-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #34c759;
+}
+
+.session-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.session-header .goto-terminal {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 .flags {
   margin-top: 10px;
   padding-top: 10px;

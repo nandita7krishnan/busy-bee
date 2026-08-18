@@ -4,6 +4,9 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Kept identical to busy_bee/colors.py, which also colors each
+// project's live Terminal tabs to match -- if you touch this hash or
+// palette, touch both.
 const PROJECT_COLOR_COUNT = 8;
 
 function projectColorClass(name) {
@@ -32,9 +35,12 @@ function renderFlagLine(item, type) {
   // the actual terminal, not a place that can drift from it. Real
   // resolution happens when the agent calls `dashctl resolve` after
   // the user responds in that terminal. Clicking a flag line just
-  // takes you there, same as clicking the project name.
+  // takes you there, same as clicking the project name -- to that
+  // item's own session if it still has one, else the project's last
+  // known terminal.
+  const ttyAttr = item.tty ? ` data-tty="${escapeHtml(item.tty)}"` : "";
   return `
-    <div class="flag-line ${type}" data-open-terminal>
+    <div class="flag-line ${type}" data-open-terminal${ttyAttr}>
       <span class="dot"></span>
       <span class="item-text">${escapeHtml(item.text)}</span>
       <span class="goto-terminal">open →</span>
@@ -42,9 +48,26 @@ function renderFlagLine(item, type) {
   `;
 }
 
+function renderSession(session, index) {
+  return `
+    <div class="session-block">
+      <div class="session-header" data-open-terminal data-tty="${escapeHtml(session.tty)}">
+        <span class="live-dot"></span>
+        <span class="session-label">Session ${index + 1}</span>
+        <span class="goto-terminal">open →</span>
+      </div>
+      <div class="session-columns">
+        ${renderColumn("Done", session.done, "done", "nothing yet")}
+        ${renderColumn("Next", session.todo, "todo", "nothing queued")}
+      </div>
+    </div>
+  `;
+}
+
 function renderCard(project) {
   const colorClass = projectColorClass(project.name);
   const hasFlags = project.blockers.length > 0 || project.questions.length > 0;
+  const hasSessions = project.sessions.length > 0;
   const expanded = true; // always expanded by default; chevron can still collapse manually
 
   const badges = [
@@ -67,21 +90,33 @@ function renderCard(project) {
     ? `<span class="summary-text" title="${escapeHtml(project.summary)}">${escapeHtml(project.summary)}</span>`
     : "";
 
+  // With one live session (the common case) the header still resumes
+  // it directly, same as before sessions existed. With several, which
+  // one the header itself should resume is ambiguous, so it defers to
+  // each session block's own "open" affordance instead.
+  const titleTtyAttr =
+    project.sessions.length === 1 ? ` data-tty="${escapeHtml(project.sessions[0].tty)}"` : "";
+  const titleOpensTerminal = project.sessions.length <= 1;
+
+  const body = hasSessions
+    ? `<div class="sessions-row">${project.sessions.map(renderSession).join("")}</div>`
+    : `<div class="columns">
+        ${renderColumn("Done", project.done, "done", "nothing yet")}
+        ${renderColumn("Next", project.todo, "todo", "nothing queued")}
+      </div>`;
+
   return `
     <div class="card ${colorClass} ${expanded ? "expanded" : ""}" data-project="${escapeHtml(project.name)}">
       <div class="card-header" data-toggle>
         <span class="chevron">&#9656;</span>
-        <div class="title-row" data-open-terminal>
+        <div class="title-row" ${titleOpensTerminal ? `data-open-terminal${titleTtyAttr}` : ""}>
           <span class="project-name">${escapeHtml(project.name)}</span>
           ${summaryHtml}
         </div>
         ${badges}
       </div>
       <div class="card-body">
-        <div class="columns">
-          ${renderColumn("Done", project.done, "done", "nothing yet")}
-          ${renderColumn("Next", project.todo, "todo", "nothing queued")}
-        </div>
+        ${body}
         ${flagsHtml}
       </div>
     </div>
@@ -110,7 +145,8 @@ function render(projects) {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       const project = el.closest(".card").dataset.project;
-      window.pywebview.api.open_terminal(project);
+      const tty = el.dataset.tty || null;
+      window.pywebview.api.open_terminal(project, tty);
     });
   });
 }

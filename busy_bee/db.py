@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS items (
   resolved_at TIMESTAMP,
   source TEXT NOT NULL DEFAULT 'agent',
   source_id TEXT,
+  terminal_tty TEXT,
   UNIQUE(project, source_id)
 );
 
@@ -77,6 +78,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "SELECT id, project, type, text, created_at, resolved_at, source, source_id FROM items_old"
         )
         conn.execute("DROP TABLE items_old")
+
+    item_columns = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
+    if "terminal_tty" not in item_columns:
+        conn.execute("ALTER TABLE items ADD COLUMN terminal_tty TEXT")
 
 
 def init_db() -> None:
@@ -136,17 +141,19 @@ def upsert_item(
     resolved_at: str | None,
     source: str,
     source_id: str | None,
+    terminal_tty: str | None = None,
 ) -> None:
     with connect() as conn:
         conn.execute(
             """
-            INSERT INTO items (project, type, text, created_at, resolved_at, source, source_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO items (project, type, text, created_at, resolved_at, source, source_id, terminal_tty)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project, source_id) DO UPDATE SET
                 text = excluded.text,
-                resolved_at = excluded.resolved_at
+                resolved_at = excluded.resolved_at,
+                terminal_tty = excluded.terminal_tty
             """,
-            (project, item_type, text, created_at, resolved_at, source, source_id),
+            (project, item_type, text, created_at, resolved_at, source, source_id, terminal_tty),
         )
 
 
@@ -160,8 +167,14 @@ def get_project(name: str) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM projects WHERE name = ?", (name,)).fetchone()
 
 
-def get_recent_done(project: str, limit: int = 3) -> list[sqlite3.Row]:
+def get_recent_done(project: str, limit: int = 3, terminal_tty: str | None = None) -> list[sqlite3.Row]:
     with connect() as conn:
+        if terminal_tty is not None:
+            return conn.execute(
+                "SELECT * FROM items WHERE project = ? AND type = 'done' AND terminal_tty = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (project, terminal_tty, limit),
+            ).fetchall()
         return conn.execute(
             "SELECT * FROM items WHERE project = ? AND type = 'done' "
             "ORDER BY created_at DESC LIMIT ?",
@@ -169,15 +182,34 @@ def get_recent_done(project: str, limit: int = 3) -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def get_next_todo(project: str, limit: int = 3) -> list[sqlite3.Row]:
+def get_next_todo(project: str, limit: int = 3, terminal_tty: str | None = None) -> list[sqlite3.Row]:
     """The most recently logged unresolved todos -- i.e. whatever was
     most immediately planned, not the oldest backlog items."""
     with connect() as conn:
+        if terminal_tty is not None:
+            return conn.execute(
+                "SELECT * FROM items WHERE project = ? AND type = 'todo' AND resolved_at IS NULL "
+                "AND terminal_tty = ? ORDER BY created_at DESC LIMIT ?",
+                (project, terminal_tty, limit),
+            ).fetchall()
         return conn.execute(
             "SELECT * FROM items WHERE project = ? AND type = 'todo' AND resolved_at IS NULL "
             "ORDER BY created_at DESC LIMIT ?",
             (project, limit),
         ).fetchall()
+
+
+def get_project_ttys(project: str) -> list[str]:
+    """Every tty that has ever logged an item for this project, most
+    recently active first -- callers intersect this with currently-live
+    ttys to find sessions that are still actually open."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT terminal_tty FROM items WHERE project = ? AND terminal_tty IS NOT NULL "
+            "GROUP BY terminal_tty ORDER BY MAX(created_at) DESC",
+            (project,),
+        ).fetchall()
+        return [r["terminal_tty"] for r in rows]
 
 
 def get_unresolved(project: str, item_type: str) -> list[sqlite3.Row]:

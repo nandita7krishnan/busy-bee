@@ -74,6 +74,17 @@ def test_sync_project_propagates_terminal_tty(tmp_path, monkeypatch):
     assert project["terminal_tty"] == "ttys002"
 
 
+def test_sync_project_records_terminal_tty_per_item(tmp_path, monkeypatch):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    project_store.add_item(project_dir, "done", "did a thing")
+
+    aggregator.sync_project("proj", str(project_dir))
+
+    assert db.get_project_ttys("proj") == ["ttys002"]
+
+
 def test_sync_project_propagates_last_summary(tmp_path):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()

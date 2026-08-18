@@ -156,3 +156,86 @@ def test_migrate_rebuilds_items_table_preserving_rows_and_allowing_summary(tmp_p
 
     db.upsert_item("p1", "summary", "now works", "2026-08-14T11:00:00+00:00", None, "agent", "new1")
     assert [r["text"] for r in db.get_unresolved("p1", "summary")] == ["now works"]
+
+
+def test_migrate_adds_terminal_tty_to_preexisting_items_table(tmp_path, monkeypatch):
+    import sqlite3
+
+    old_db_path = tmp_path / "old.sqlite"
+    monkeypatch.setattr(config, "DB_PATH", old_db_path)
+
+    # A DB from after 'summary' was added but before terminal_tty
+    # existed on items -- the CHECK-constraint rebuild path above won't
+    # fire, so this exercises the separate ALTER TABLE ADD COLUMN path.
+    conn = sqlite3.connect(old_db_path)
+    conn.executescript(
+        """
+        CREATE TABLE items (
+          id INTEGER PRIMARY KEY,
+          project TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('done','todo','blocker','question','summary')),
+          text TEXT NOT NULL,
+          created_at TIMESTAMP NOT NULL,
+          resolved_at TIMESTAMP,
+          source TEXT NOT NULL DEFAULT 'agent',
+          source_id TEXT,
+          UNIQUE(project, source_id)
+        );
+        CREATE TABLE projects (
+          name TEXT PRIMARY KEY,
+          path TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'idle',
+          last_seen_at TIMESTAMP,
+          terminal_tty TEXT,
+          last_summary TEXT
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+
+    db.upsert_item(
+        "p1", "done", "with tty", "2026-08-14T11:00:00+00:00", None, "agent", "t1",
+        terminal_tty="ttys002",
+    )
+    assert db.get_project_ttys("p1") == ["ttys002"]
+
+
+def test_upsert_item_persists_terminal_tty():
+    db.upsert_item(
+        project="p1",
+        item_type="done",
+        text="did a thing",
+        created_at="2026-08-14T10:00:00+00:00",
+        resolved_at=None,
+        source="agent",
+        source_id="a1",
+        terminal_tty="ttys002",
+    )
+    rows = db.get_recent_done("p1")
+    assert rows[0]["terminal_tty"] == "ttys002"
+
+
+def test_get_recent_done_and_next_todo_filter_by_terminal_tty():
+    db.upsert_item("p1", "done", "session A done", "2026-08-14T10:00:00+00:00", None, "agent", "a1", terminal_tty="ttys001")
+    db.upsert_item("p1", "done", "session B done", "2026-08-14T10:01:00+00:00", None, "agent", "b1", terminal_tty="ttys002")
+    db.upsert_item("p1", "todo", "session A todo", "2026-08-14T10:02:00+00:00", None, "agent", "a2", terminal_tty="ttys001")
+    db.upsert_item("p1", "todo", "session B todo", "2026-08-14T10:03:00+00:00", None, "agent", "b2", terminal_tty="ttys002")
+
+    assert [r["text"] for r in db.get_recent_done("p1", terminal_tty="ttys001")] == ["session A done"]
+    assert [r["text"] for r in db.get_next_todo("p1", terminal_tty="ttys002")] == ["session B todo"]
+
+
+def test_get_project_ttys_orders_by_most_recent_activity():
+    db.upsert_item("p1", "done", "old", "2026-08-14T10:00:00+00:00", None, "agent", "a1", terminal_tty="ttys001")
+    db.upsert_item("p1", "done", "new", "2026-08-14T10:05:00+00:00", None, "agent", "b1", terminal_tty="ttys002")
+    db.upsert_item("p1", "done", "older still", "2026-08-14T09:00:00+00:00", None, "agent", "a2", terminal_tty="ttys001")
+
+    assert db.get_project_ttys("p1") == ["ttys002", "ttys001"]
+
+
+def test_get_project_ttys_ignores_items_without_a_tty():
+    db.upsert_item("p1", "done", "no tty", "2026-08-14T10:00:00+00:00", None, "agent", "a1")
+    assert db.get_project_ttys("p1") == []

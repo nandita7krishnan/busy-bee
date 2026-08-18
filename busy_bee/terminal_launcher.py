@@ -15,6 +15,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from busy_bee import colors
+
 LIST_TABS_APPLESCRIPT = """
 tell application "Terminal"
     set output to ""
@@ -92,6 +94,55 @@ def _find_tab_by_tty(tty: str) -> dict | None:
 def _focus_terminal_tab(window_id: str, tab_index: str) -> None:
     script = FOCUS_TAB_APPLESCRIPT.format(window_id=window_id, tab_index=tab_index)
     subprocess.run(["osascript", "-e", script], check=True)
+
+
+_colored_ttys: set[str] = set()
+
+
+def _hex_to_terminal_rgb(hex_color: str) -> tuple[int, int, int]:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    # Terminal.app's AppleScript color properties are 16-bit per
+    # channel (0-65535), not the usual 8-bit (0-255).
+    return r * 257, g * 257, b * 257
+
+
+def color_tab(window_id: str, tab_index: str, hex_color: str) -> None:
+    r, g, b = _hex_to_terminal_rgb(hex_color)
+    rgb_list = "{%d, %d, %d}" % (r, g, b)
+    script = f"""
+tell application "Terminal"
+    set background color of tab {tab_index} of (first window whose id is {window_id}) to {rgb_list}
+end tell
+"""
+    subprocess.run(["osascript", "-e", script], check=True)
+
+
+def prune_colored_ttys(live_ttys: set[str]) -> None:
+    """Drops any tty that's no longer live from the colored set, so if
+    that tty number gets reused by a later, unrelated terminal window,
+    it gets colored fresh for whichever project that one belongs to."""
+    _colored_ttys.intersection_update(live_ttys)
+
+
+def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
+    """Colors each of this project's currently-live Terminal tabs to
+    match its dashboard card color, the first time we see it live -- a
+    visual cue for which project a given terminal window belongs to.
+    No-ops for ttys already colored this run, or that aren't an actual
+    Terminal.app tab (iTerm isn't scriptable the same way here, and a
+    dead tty has no window to find)."""
+    color = None
+    for tty in live_ttys:
+        if tty in _colored_ttys:
+            continue
+        tab = _find_tab_by_tty(tty)
+        if tab is None:
+            continue
+        if color is None:
+            color = colors.project_color(project_name)
+        color_tab(tab["window_id"], tab["tab_index"], color)
+        _colored_ttys.add(tty)
 
 
 def resume_project(path: str, terminal_app: str = "Terminal", tty: str | None = None) -> None:
