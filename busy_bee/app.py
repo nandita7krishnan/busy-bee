@@ -66,6 +66,13 @@ class Api:
             sessions = [
                 {
                     "tty": tty,
+                    # Claude Code auto-titles its Terminal tab with a
+                    # summary of that conversation -- a far more useful
+                    # label than "Session 1", "Session 2". Falls back to
+                    # the tty itself if the tab has no title yet (or
+                    # isn't Terminal.app), so the UI always has *some*
+                    # stable per-session label to key off of.
+                    "name": terminal_launcher.session_title_for_tty(tty) or tty,
                     "done": [row["text"] for row in db.get_recent_done(p["name"], terminal_tty=tty)],
                     "todo": [row["text"] for row in db.get_next_todo(p["name"], terminal_tty=tty)],
                 }

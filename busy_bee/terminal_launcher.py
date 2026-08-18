@@ -25,7 +25,8 @@ tell application "Terminal"
         set tabCount to count of tabs of w
         repeat with i from 1 to tabCount
             set ttyName to tty of tab i of w
-            set output to output & winId & "|" & i & "|" & ttyName & linefeed
+            set titleText to custom title of tab i of w
+            set output to output & winId & "|" & i & "|" & ttyName & "|" & titleText & linefeed
         end repeat
     end repeat
     return output
@@ -67,11 +68,13 @@ def _list_terminal_tabs() -> list[dict]:
         return []
     tabs = []
     for line in result.stdout.strip().splitlines():
-        parts = line.split("|")
-        if len(parts) != 3:
+        # maxsplit=3: a custom title could itself contain "|", so only
+        # the first three delimiters are structural.
+        parts = line.split("|", 3)
+        if len(parts) != 4:
             continue
-        window_id, tab_index, tty = parts
-        tabs.append({"window_id": window_id, "tab_index": tab_index, "tty": tty})
+        window_id, tab_index, tty, title = parts
+        tabs.append({"window_id": window_id, "tab_index": tab_index, "tty": tty, "title": title})
     return tabs
 
 
@@ -94,6 +97,36 @@ def _find_tab_by_tty(tty: str) -> dict | None:
 def _focus_terminal_tab(window_id: str, tab_index: str) -> None:
     script = FOCUS_TAB_APPLESCRIPT.format(window_id=window_id, tab_index=tab_index)
     subprocess.run(["osascript", "-e", script], check=True)
+
+
+def session_title_for_tty(tty: str) -> str | None:
+    """Claude Code sets each Terminal tab's custom title to an
+    auto-generated summary of that conversation (e.g. "Busy bee repo",
+    visible as the tab/window title bar text) -- a much more useful
+    label for a live session than a generic "Session 1", "Session 2".
+    Returns None if no live tab matches this tty (closed since, or not
+    Terminal.app), or if the tab has no custom title set (a plain idle
+    shell defaults to "Terminal", not a real name -- also None so the
+    caller can fall back sensibly).
+
+    Claude Code prefixes the title with a one-character busy/idle glyph
+    (e.g. "✳ Busy bee repo") that's meaningful in a title bar but just
+    noise on a dashboard card that already has its own live-session
+    indicator dot -- stripped here rather than in the UI layer, since
+    every consumer of this function wants the plain name."""
+    tab = _find_tab_by_tty(tty)
+    if tab is None:
+        return None
+    title = tab["title"].strip()
+    if not title or title == "Terminal":
+        return None
+    first, _, rest = title.partition(" ")
+    # A real word can contain punctuation (e.g. "busy-bee") and still be
+    # part of the title -- only strip the prefix when it has *no*
+    # alphanumeric characters at all, i.e. it's purely a status glyph.
+    if rest and not any(c.isalnum() for c in first):
+        title = rest.strip()
+    return title or None
 
 
 _colored_ttys: set[str] = set()

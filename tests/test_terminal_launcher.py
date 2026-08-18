@@ -9,14 +9,63 @@ class FakeResult:
 
 def test_list_terminal_tabs_parses_osascript_output(monkeypatch):
     def fake_run(cmd, capture_output, text):
-        return FakeResult(stdout="437|1|/dev/ttys001\n1226|2|/dev/ttys002\n")
+        return FakeResult(
+            stdout="437|1|/dev/ttys001|busy-bee repo\n1226|2|/dev/ttys002|Terminal\n"
+        )
 
     monkeypatch.setattr(tl.subprocess, "run", fake_run)
     tabs = tl._list_terminal_tabs()
     assert tabs == [
-        {"window_id": "437", "tab_index": "1", "tty": "/dev/ttys001"},
-        {"window_id": "1226", "tab_index": "2", "tty": "/dev/ttys002"},
+        {"window_id": "437", "tab_index": "1", "tty": "/dev/ttys001", "title": "busy-bee repo"},
+        {"window_id": "1226", "tab_index": "2", "tty": "/dev/ttys002", "title": "Terminal"},
     ]
+
+
+def test_list_terminal_tabs_skips_malformed_lines(monkeypatch):
+    # A line missing a field (e.g. a mid-write race) shouldn't crash the
+    # whole parse -- just drop that one line.
+    monkeypatch.setattr(
+        tl.subprocess, "run", lambda *a, **k: FakeResult(stdout="437|1|/dev/ttys001\n")
+    )
+    assert tl._list_terminal_tabs() == []
+
+
+def test_session_title_for_tty_returns_custom_title(monkeypatch):
+    monkeypatch.setattr(
+        tl,
+        "_find_tab_by_tty",
+        lambda tty: {"window_id": "9", "tab_index": "2", "tty": "/dev/ttys002", "title": "busy-bee repo"},
+    )
+    assert tl.session_title_for_tty("ttys002") == "busy-bee repo"
+
+
+def test_session_title_for_tty_none_when_tab_not_found(monkeypatch):
+    monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: None)
+    assert tl.session_title_for_tty("ttys999") is None
+
+
+def test_session_title_for_tty_strips_leading_status_glyph(monkeypatch):
+    # Claude Code prefixes its auto-title with a busy/idle glyph
+    # ("✳ Busy bee repo") that's redundant next to the dashboard's own
+    # live-session dot.
+    monkeypatch.setattr(
+        tl,
+        "_find_tab_by_tty",
+        lambda tty: {"window_id": "9", "tab_index": "2", "tty": "/dev/ttys002", "title": "✳ Busy bee repo"},
+    )
+    assert tl.session_title_for_tty("ttys002") == "Busy bee repo"
+
+
+def test_session_title_for_tty_none_for_untitled_shell(monkeypatch):
+    # A plain shell with no Claude Code conversation defaults to
+    # "Terminal" -- not a real name, so callers should get None and
+    # fall back to something else rather than showing that literally.
+    monkeypatch.setattr(
+        tl,
+        "_find_tab_by_tty",
+        lambda tty: {"window_id": "9", "tab_index": "2", "tty": "/dev/ttys002", "title": "Terminal"},
+    )
+    assert tl.session_title_for_tty("ttys002") is None
 
 
 def test_list_terminal_tabs_returns_empty_on_failure(monkeypatch):

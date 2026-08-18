@@ -53,7 +53,7 @@ function renderSession(session, index) {
     <div class="session-block">
       <div class="session-header" data-open-terminal data-tty="${escapeHtml(session.tty)}">
         <span class="live-dot"></span>
-        <span class="session-label">Session ${index + 1}</span>
+        <span class="session-label" title="${escapeHtml(session.name || `Session ${index + 1}`)}">${escapeHtml(session.name || `Session ${index + 1}`)}</span>
         <span class="goto-terminal">open →</span>
       </div>
       <div class="session-columns">
