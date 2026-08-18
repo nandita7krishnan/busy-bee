@@ -23,10 +23,12 @@ Also:
     dashctl init [--name NAME]   register the current directory under
                                   an explicit name, instead of the
                                   directory's basename
+    dashctl untrack NAME          stop tracking a project and delete
+                                  its logged items from the central store
     dashctl setup-global          one-time: installs the CLAUDE.md
-                                  snippet and Stop hook at the Claude
-                                  Code user level so every project
-                                  gets tracked automatically
+                                  snippet and Stop/SessionStart/PostToolUse
+                                  hooks at the Claude Code user level so
+                                  every project gets tracked automatically
 
 Operates on the current working directory as the project root -- the
 agent runs these from inside the project, same as any other CLI tool

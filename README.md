@@ -45,8 +45,10 @@ Code. If it had to fall back to `~/.local/bin`, it prints an explicit
 
 `install.sh` runs `dashctl setup-global`, which installs
 [`claude_md_snippet.md`](./claude_md_snippet.md) into
-`~/.claude/CLAUDE.md` and the [`Stop` hook](./hooks/stop_hook.py) into
-`~/.claude/settings.json`, both at the Claude Code *user* level. This
+`~/.claude/CLAUDE.md` and the [`Stop`](./hooks/stop_hook.py),
+[`SessionStart`](./hooks/session_start_hook.py), and
+`PostToolUse`/`TodoWrite` (`hooks/todo_sync_hook.py`) hooks into
+`~/.claude/settings.json`, all at the Claude Code *user* level. This
 is what makes tracking automatic: every Claude Code session on the
 machine picks up the instructions, and any project auto-registers
 itself the first time an agent in it calls `dashctl` -- no
@@ -60,7 +62,9 @@ directly to run `dashctl`, or start a fresh session in that project.
 
 (`dashctl init [--name NAME]` still exists if you want to register a
 project under a name other than its directory's basename, or register
-it before an agent has logged anything there.)
+it before an agent has logged anything there. `dashctl untrack NAME`
+does the reverse -- stops tracking a project and deletes its logged
+items from the central store, e.g. to clean up a stray registration.)
 
 **Note:** `$HOME` itself is never auto-registered, even if a Claude
 Code session runs directly in it (not inside an actual project) --
@@ -166,6 +170,16 @@ The aggregator polls every 5s by default (configurable in
 `~/.claude-dashboard/config.json`), so give it a few seconds, then
 reopen the popover -- that project's card should now be there.
 
+Every card is scoped to sessions with a currently-live `claude`
+process, keyed by terminal tty + Claude Code's own per-invocation
+session id (a tty gets reused across unrelated sessions in the same
+terminal window, which the session id disambiguates). Once a
+session's terminal closes, its whole card disappears -- its done/todo
+history isn't lost (still in `status.json`/the central db, and comes
+back if that session ever logs again), it just stops rendering. Any
+blocker/question it left unresolved is auto-resolved at that point
+too, rather than lingering on the project's badge forever.
+
 ### Reinstalling / updating after pulling new code
 
 The LaunchAgent runs `.venv/bin/busy-bee` directly, not a frozen
@@ -222,10 +236,11 @@ busy_bee/
   app.py                 rumps tray app + pywebview popover wiring
   icon.py                 renders the bee icon (menu bar + Dock, badge composited in)
   todo_sync.py             syncs Claude Code's TodoWrite list into dashctl
-  global_setup.py           installs the CLAUDE.md snippet + Stop/PostToolUse hooks globally
+  global_setup.py           installs the CLAUDE.md snippet + Stop/SessionStart/PostToolUse hooks globally
   ui/                        popover.html/css/js, widget.html/js (floating icon)
 hooks/
-  stop_hook.py           Claude Code Stop hook (the safety net)
+  stop_hook.py           Claude Code Stop hook (the safety net, also nudges periodic summaries)
+  session_start_hook.py  Claude Code SessionStart hook -- marks a new session before it logs anything
   todo_sync_hook.py      PostToolUse/TodoWrite hook -- calls busy_bee/todo_sync.py
 claude_md_snippet.md   installed into ~/.claude/CLAUDE.md by setup-global
 scripts/
