@@ -1,4 +1,15 @@
+import pytest
+
 from busy_bee import terminal_launcher as tl
+
+
+@pytest.fixture(autouse=True)
+def no_real_app_activation(monkeypatch):
+    # _activate_terminal_front_window_only reaches into AppKit and would
+    # genuinely bring Terminal forward mid-test-run. Stubbed to report
+    # success so the fallback path isn't taken unless a test asks for it.
+    monkeypatch.setattr(tl, "_activate_terminal_front_window_only", lambda: True)
+    yield
 
 
 class FakeResult:
@@ -120,12 +131,23 @@ def test_resume_project_focuses_existing_session_when_tty_alive(monkeypatch):
 
 def test_resume_project_opens_new_window_when_no_tty_recorded(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+    monkeypatch.setattr(
+        tl.subprocess,
+        "run",
+        lambda cmd, **k: calls.append(cmd) or FakeResult(stdout="my-project\n"),
+    )
 
     tl.resume_project(str(tmp_path), tty=None)
+    # Two calls: open the window, then raise that one window. The open
+    # script must not `activate` -- that's app-level and drags every
+    # other Terminal window forward with it.
+    # One osascript call to open the window; the raise is an in-process
+    # AppKit activation, not another subprocess. The open script must not
+    # `activate` -- that's app-level and drags every other window forward.
     assert len(calls) == 1
     assert calls[0][0] == "osascript"
     assert "claude --continue" in calls[0][2]
+    assert "activate" not in calls[0][2]
 
 
 def test_resume_project_opens_new_window_when_tty_is_stale(tmp_path, monkeypatch):
@@ -137,11 +159,16 @@ def test_resume_project_opens_new_window_when_tty_is_stale(tmp_path, monkeypatch
     monkeypatch.setattr(tl, "_find_tab_by_tty", fail_if_focus_attempted)
 
     calls = []
-    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+    monkeypatch.setattr(
+        tl.subprocess,
+        "run",
+        lambda cmd, **k: calls.append(cmd) or FakeResult(stdout="my-project\n"),
+    )
 
     tl.resume_project(str(tmp_path), tty="ttys002")
     assert len(calls) == 1
     assert "claude --continue" in calls[0][2]
+    assert "activate" not in calls[0][2]
 
 
 def test_resume_project_ignores_tty_for_iterm(tmp_path, monkeypatch):
@@ -154,6 +181,8 @@ def test_resume_project_ignores_tty_for_iterm(tmp_path, monkeypatch):
     monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
 
     tl.resume_project(str(tmp_path), terminal_app="iTerm", tty="ttys002")
+    # iTerm's new window is already frontmost and exposes no window name
+    # to match on, so it gets no separate raise call.
     assert len(calls) == 1
     assert "iTerm" in calls[0][2]
 
@@ -235,3 +264,49 @@ def test_prune_colored_ttys_drops_dead_ttys():
     tl.prune_colored_ttys({"ttys001"})
 
     assert tl._colored_ttys == {"ttys001"}
+
+
+def test_raise_window_uses_front_window_only_activation(monkeypatch):
+    # The bug this exists to prevent: any app-level activate brings every
+    # Terminal window forward, burying whatever else was on screen.
+    calls = []
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+    activated = []
+    monkeypatch.setattr(
+        tl, "_activate_terminal_front_window_only", lambda: activated.append(True) or True
+    )
+
+    tl._raise_window()
+
+    assert activated == [True]
+    assert calls == []  # no subprocess at all on the happy path
+
+
+def test_raise_window_falls_back_to_app_activate_when_appkit_unavailable(monkeypatch):
+    # Raising every Terminal window is worse than raising one, but far
+    # better than the terminal never coming forward at all.
+    calls = []
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+    monkeypatch.setattr(tl, "_activate_terminal_front_window_only", lambda: False)
+
+    tl._raise_window()
+
+    assert len(calls) == 1
+    assert "to activate" in calls[0][2]
+
+
+def test_focus_terminal_tab_orders_the_window_front_without_activating(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: calls.append(cmd) or FakeResult())
+
+    tl._focus_terminal_tab("9", "2")
+
+    # Orders the target within Terminal; never app-level activates.
+    assert "set index of targetWindow to 1" in calls[0][2]
+    assert "activate" not in calls[0][2]
+
+
+def test_no_applescript_activates_the_whole_app():
+    # Every remaining `activate` must be the deliberate fallback only.
+    for script in (tl.FOCUS_TAB_APPLESCRIPT, tl.NEW_TERMINAL_WINDOW_APPLESCRIPT):
+        assert "activate" not in script
