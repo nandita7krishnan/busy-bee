@@ -146,7 +146,9 @@ def test_sync_session_state_attributes_tty_to_most_recent_project_only(monkeypat
 
     calls = {}
     monkeypatch.setattr(
-        aggregator.terminal_launcher, "sync_session_colors", lambda name, ttys: calls.setdefault(name, ttys)
+        aggregator.terminal_launcher,
+        "sync_session_colors",
+        lambda name, ttys, color_index=None: calls.setdefault(name, ttys),
     )
 
     live_ttys = frozenset({"ttys002"})

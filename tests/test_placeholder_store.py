@@ -152,3 +152,32 @@ def test_delete_placeholder_removes_it_and_its_tasks():
 
 def test_delete_unknown_placeholder_returns_false():
     assert placeholder_store.delete("nope") is False
+
+
+def test_ensure_color_index_backfills_a_record_created_before_the_field_existed():
+    # Regression: such a record has no color_index, and any "default to
+    # 0" fallback puts every one of them on the same color as whichever
+    # real project already holds slot 0.
+    db.upsert_project("real-proj", "/tmp/real-proj")
+    assert db.ensure_color_index("real-proj") == 0
+
+    placeholder_store.create("legacy")
+    records = placeholder_store.load()
+    del records[0]["color_index"]  # as written before the field existed
+    placeholder_store._save(records)
+
+    index = placeholder_store.ensure_color_index("legacy")
+
+    assert index != 0
+    # Persisted, not recomputed each call.
+    assert placeholder_store.get("legacy")["color_index"] == index
+    assert placeholder_store.ensure_color_index("legacy") == index
+
+
+def test_create_assigns_a_slot_not_already_taken_by_a_real_project():
+    db.upsert_project("real-proj", "/tmp/real-proj")
+    db.ensure_color_index("real-proj")
+
+    record = placeholder_store.create("fresh")
+
+    assert record["color_index"] != 0

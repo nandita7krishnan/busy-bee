@@ -4,17 +4,19 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// Kept identical to busy_bee/colors.py, which also colors each
-// project's live Terminal tabs to match -- if you touch this hash or
-// palette, touch both.
+// The palette slot comes from Python (db.ensure_color_index, surfaced
+// as `color` by Api.get_projects), which allocates against the slots
+// already in use. This used to hash the project name here instead --
+// which, knowing nothing about the other projects on screen, handed
+// two of them the same color. The same index drives the project's
+// Terminal tab tint (busy_bee/colors.py), so card and terminal still
+// match; --proj-N in popover.css must stay in step with PROJECT_COLORS
+// there.
 const PROJECT_COLOR_COUNT = 8;
 
-function projectColorClass(name) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  }
-  return `proj-${hash % PROJECT_COLOR_COUNT}`;
+function projectColorClass(project) {
+  const index = Number.isInteger(project.color) ? project.color : 0;
+  return `proj-${index % PROJECT_COLOR_COUNT}`;
 }
 
 // `items` is either a list of plain strings (session-level done/todo --
@@ -93,7 +95,7 @@ function renderSession(session, index) {
 }
 
 function renderPlaceholderCard(project) {
-  const colorClass = projectColorClass(project.name);
+  const colorClass = projectColorClass(project);
   const error = createFolderErrors[project.name];
   const errorHtml = error
     ? `<div class="form-error">${escapeHtml(error)}</div>`
@@ -104,8 +106,14 @@ function renderPlaceholderCard(project) {
   // IS this card's primary action, and it replaces the purely
   // informational "no folder" pill that used to say the same thing
   // without offering to do anything about it.
+  //
+  // Rendered collapsed: a placeholder is usually a thing you jotted
+  // down and won't touch again for a while, so it shouldn't take up as
+  // much room as a project with a live session. "+ Task" on the right
+  // edge is what keeps it one click to add to anyway -- it expands the
+  // card and drops the cursor straight in the input.
   return `
-    <div class="card ${colorClass} expanded" data-project="${escapeHtml(project.name)}" data-placeholder="true">
+    <div class="card ${colorClass}" data-project="${escapeHtml(project.name)}" data-placeholder="true">
       <div class="card-header" data-toggle>
         <span class="chevron">&#9656;</span>
         <div class="title-row">
@@ -115,6 +123,7 @@ function renderPlaceholderCard(project) {
             Create folder&hellip;
           </span>
         </div>
+        <span class="add-task-btn" data-focus-task title="Add a task">+ Task</span>
       </div>
       <div class="card-body">
         <div class="columns">
@@ -131,7 +140,7 @@ function renderPlaceholderCard(project) {
 }
 
 function renderRealCard(project) {
-  const colorClass = projectColorClass(project.name);
+  const colorClass = projectColorClass(project);
   const hasFlags = project.blockers.length > 0 || project.questions.length > 0;
   const hasSessions = project.sessions.length > 0;
   const expanded = true; // always expanded by default; chevron can still collapse manually
@@ -232,25 +241,35 @@ function render(projects) {
   }
   emptyEl.hidden = true;
 
-  // Collapsed cards would otherwise re-expand on every refresh (every
-  // card renders `expanded` by default) -- remembered and reapplied
-  // here so a manual collapse actually sticks across the 5s poll.
-  const collapsed = new Set(
-    [...cardsEl.querySelectorAll(".card:not(.expanded)")].map((c) => c.dataset.project)
+  // Whatever the user last toggled a card to, remembered across the 5s
+  // refresh that rebuilds all this markup. Recorded as the actual state
+  // rather than just "which ones are collapsed", because the two card
+  // types default opposite ways -- real cards start expanded,
+  // placeholders start collapsed -- so either direction can be the
+  // deviation worth preserving.
+  const wasExpanded = new Map(
+    [...cardsEl.querySelectorAll(".card")].map((c) => [
+      c.dataset.project,
+      c.classList.contains("expanded"),
+    ])
   );
 
   cardsEl.innerHTML = projects.map(renderCard).join("");
 
   cardsEl.querySelectorAll(".card").forEach((card) => {
-    if (collapsed.has(card.dataset.project)) card.classList.remove("expanded");
+    const previous = wasExpanded.get(card.dataset.project);
+    // Absent => a card that wasn't on screen last render; leave it at
+    // whatever default its own template chose.
+    if (previous !== undefined) card.classList.toggle("expanded", previous);
   });
 
   cardsEl.querySelectorAll("[data-toggle]").forEach((header) => {
     header.addEventListener("click", (e) => {
-      // Both live in the header and have their own handlers -- a click
-      // on either shouldn't also collapse the card underneath it.
+      // These live in the header and have their own handlers -- a click
+      // on any of them shouldn't also toggle the card underneath it.
       if (e.target.closest("[data-open-terminal]")) return;
       if (e.target.closest("[data-create-folder]")) return;
+      if (e.target.closest("[data-focus-task]")) return;
       header.closest(".card").classList.toggle("expanded");
     });
   });
@@ -261,6 +280,18 @@ function render(projects) {
       const project = el.closest(".card").dataset.project;
       const tty = el.dataset.tty || null;
       window.pywebview.api.open_terminal(project, tty);
+    });
+  });
+
+  cardsEl.querySelectorAll("[data-focus-task]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const card = el.closest(".card");
+      card.classList.add("expanded");
+      // Focusing also parks the deferred-render guard on this card (see
+      // render()), so the 5s refresh won't yank the input away while
+      // the user is typing into the box it just opened for them.
+      card.querySelector(".task-input").focus();
     });
   });
 

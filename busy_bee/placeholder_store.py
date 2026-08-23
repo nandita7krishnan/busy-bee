@@ -96,6 +96,53 @@ def _validate_name(name: str, existing_names: set[str]) -> None:
         raise ValueError(f"a project named {name!r} already exists")
 
 
+def _allocate_color_index(placeholders: list[dict]) -> int:
+    """A palette slot for a new placeholder card, counting both existing
+    placeholders and real tracked projects as taken so nothing on the
+    dashboard ends up sharing a color. Falls back to counting only
+    placeholders if the central db isn't readable (it's a cache; a
+    missing one shouldn't block adding a card)."""
+    from busy_bee import colors
+
+    taken = [p.get("color_index") for p in placeholders]
+    try:
+        from busy_bee import db
+
+        with db.connect() as conn:
+            taken += [
+                r["color_index"]
+                for r in conn.execute(
+                    "SELECT color_index FROM projects WHERE color_index IS NOT NULL"
+                )
+            ]
+    except Exception:
+        pass
+    return colors.least_used_index(taken)
+
+
+def ensure_color_index(name: str) -> int:
+    """This placeholder's palette slot, allocating and persisting one if
+    it doesn't have it yet.
+
+    The backfill matters for records created before color_index existed:
+    without it they have no slot, and any "just default to 0" fallback
+    silently parks every one of them on the same color as whichever real
+    project already holds slot 0 -- which is exactly the collision this
+    was all meant to fix, reintroduced through the back door."""
+    with _LOCK:
+        placeholders = load()
+        record = next((p for p in placeholders if p["name"] == name), None)
+        if record is None:
+            return 0
+        if record.get("color_index") is not None:
+            return record["color_index"]
+        record["color_index"] = _allocate_color_index(
+            [p for p in placeholders if p["name"] != name]
+        )
+        _save(placeholders)
+        return record["color_index"]
+
+
 def create(name: str) -> dict:
     """Adds a new placeholder card. Raises ValueError for a blank name,
     one containing '/' or starting with '.' (both would misbehave as a
@@ -111,6 +158,7 @@ def create(name: str) -> dict:
             "name": name,
             "created_at": _now(),
             "activated_path": None,
+            "color_index": _allocate_color_index(placeholders),
             "tasks": [],
         }
         placeholders.append(record)

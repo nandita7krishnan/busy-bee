@@ -78,7 +78,10 @@ def sync_session_state(name: str, live_ttys: frozenset[str], current_project_by_
         for t in db.get_project_ttys(name)
         if t in live_ttys and current_project_by_tty.get(t) == name
     ]
-    terminal_launcher.sync_session_colors(name, live_for_project)
+    # The project's allocated palette slot, so its Terminal tabs match
+    # its dashboard card. Resolved here rather than inside
+    # terminal_launcher, which has no business reaching into the db.
+    terminal_launcher.sync_session_colors(name, live_for_project, db.ensure_color_index(name))
 
 
 def sync_all() -> int:

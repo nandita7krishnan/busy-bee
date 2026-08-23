@@ -190,7 +190,9 @@ def _system_is_dark_mode() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "Dark"
 
 
-def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
+def sync_session_colors(
+    project_name: str, live_ttys: list[str], color_index: int | None = None
+) -> None:
     """Colors each of this project's currently-live Terminal tabs to
     match its dashboard card color, the first time we see it live -- a
     visual cue for which project a given terminal window belongs to.
@@ -214,7 +216,7 @@ def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
         tab = _find_tab_by_tty(tty)
         if tab is None:
             continue
-        color = colors.terminal_background_color(project_name, dark=dark)
+        color = colors.terminal_background_color(project_name, dark=dark, index=color_index)
         color_tab(tab["window_id"], tab["tab_index"], color)
         _colored_ttys.add(tty)
 

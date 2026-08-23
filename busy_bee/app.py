@@ -250,6 +250,11 @@ class Api:
                     "status": p["status"],
                     "summary": p["last_summary"],
                     "placeholder": False,
+                    # Allocated server-side (db.ensure_color_index) rather
+                    # than hashed from the name in JS -- hashing gave two
+                    # projects the same color. The UI just renders what
+                    # it's told now.
+                    "color": db.ensure_color_index(p["name"]),
                     # Most recent terminal activity, falling back to when
                     # the folder was created for a project activated from
                     # a placeholder that hasn't had a session yet. Sorted
@@ -284,6 +289,11 @@ class Api:
                     "status": "idle",
                     "summary": None,
                     "placeholder": True,
+                    # Allocates + persists on first use, which also
+                    # backfills records that predate color_index --
+                    # defaulting those to 0 collided with whichever real
+                    # project already had slot 0.
+                    "color": placeholder_store.ensure_color_index(record["name"]),
                     # A placeholder has no terminal, so "last touched" is
                     # the last time the user typed into it here -- which
                     # keeps a just-created card at the top, where they're

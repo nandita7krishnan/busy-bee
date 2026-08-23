@@ -150,6 +150,34 @@ def main() -> int:
             )
             return 0
 
+        # A blocker/question this session raised on an earlier turn is
+        # one the user has since replied to, so it should have been
+        # resolved rather than left sitting on the dashboard. Checked
+        # here because nothing else can: auto_resolve_dead_sessions
+        # only cleans up once the session ends. Self-limiting -- if the
+        # thing genuinely is still open, resolve it and log a fresh
+        # one, which is the intended model anyway (a flag represents
+        # something currently awaiting the user, not a history entry).
+        stale = project_store.stale_flags_awaiting_resolve(
+            project_root, session_id, turn_started_at
+        )
+        if stale:
+            listed = "; ".join(f"{i['type']} [{i['id']}] {i['text']!r}" for i in stale[:3])
+            print(
+                json.dumps(
+                    {
+                        "decision": "block",
+                        "reason": (
+                            f"The user has replied since you logged: {listed}. "
+                            "Resolve what's been answered with `dashctl resolve "
+                            "blocker|question <id>` (then re-log it if it's "
+                            "somehow still open)."
+                        ),
+                    }
+                )
+            )
+            return 0
+
     if _awaiting_user_response(_last_assistant_text(payload.get("transcript_path"))) and not (
         project_store.has_logged_this_turn(
             project_root, since_seconds=RECENT_WINDOW_SECONDS, item_type="question"

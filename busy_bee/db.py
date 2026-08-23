@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS projects (
   last_seen_at TIMESTAMP,
   terminal_tty TEXT,
   last_summary TEXT,
-  activated_at TIMESTAMP
+  activated_at TIMESTAMP,
+  color_index INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_project_type ON items(project, type);
@@ -69,6 +70,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE projects ADD COLUMN last_summary TEXT")
     if "activated_at" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN activated_at TIMESTAMP")
+    if "color_index" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN color_index INTEGER")
 
     # SQLite can't ALTER a CHECK constraint in place -- rebuild items if
     # the table predates 'summary' or 'session_start' being a valid
@@ -166,6 +169,37 @@ def mark_project_activated(name: str) -> None:
             "UPDATE projects SET activated_at = ? WHERE name = ?",
             (datetime.now(timezone.utc).isoformat(), name),
         )
+
+
+def ensure_color_index(name: str) -> int:
+    """This project's palette slot, allocating one on first use.
+
+    Assigned against what's already taken (colors.least_used_index)
+    rather than hashed from the name -- see that function for why
+    hashing was producing duplicate card colors. Placeholder projects
+    are counted as taken too, so a placeholder and a real project can't
+    end up the same color either.
+
+    Persisted once and then reused, so a project's color stays put when
+    other projects come and go. Allocation happens inside a single
+    IMMEDIATE transaction because the aggregator thread and the UI
+    thread both call this -- without it, two concurrent first-time
+    lookups could read the same "taken" set and hand out the same slot."""
+    from busy_bee import colors, placeholder_store
+
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT color_index FROM projects WHERE name = ?", (name,)).fetchone()
+        if row is not None and row["color_index"] is not None:
+            return row["color_index"]
+        taken = [
+            r["color_index"]
+            for r in conn.execute("SELECT color_index FROM projects WHERE color_index IS NOT NULL")
+        ]
+        taken += [p.get("color_index") for p in placeholder_store.load()]
+        index = colors.least_used_index(taken)
+        conn.execute("UPDATE projects SET color_index = ? WHERE name = ?", (index, name))
+        return index
 
 
 def upsert_item(
