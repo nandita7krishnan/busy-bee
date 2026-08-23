@@ -45,7 +45,7 @@ end tell
 NEW_TERMINAL_WINDOW_APPLESCRIPT = """
 tell application "Terminal"
     activate
-    do script "cd {path} && claude --continue"
+    do script "cd {path} && (claude --continue {prompt} || claude {prompt})"
 end tell
 """
 
@@ -54,10 +54,21 @@ tell application "iTerm"
     activate
     set newWindow to (create window with default profile)
     tell current session of newWindow
-        write text "cd {path} && claude --continue"
+        write text "cd {path} && (claude --continue {prompt} || claude {prompt})"
     end tell
 end tell
 """
+
+
+def _applescript_string(value: str) -> str:
+    """Escapes a value for embedding inside an AppleScript double-quoted
+    string literal. Shell-level quoting (shlex.quote) isn't enough on
+    its own here: the command is a double-quoted AppleScript string
+    *containing* a shell command, so a literal `"` or `\\` in the value
+    would terminate or mangle the AppleScript literal before the shell
+    ever sees it. Matters for prompt text (arbitrary user task
+    wording), not just paths."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _list_terminal_tabs() -> list[dict]:
@@ -208,7 +219,20 @@ def sync_session_colors(project_name: str, live_ttys: list[str]) -> None:
         _colored_ttys.add(tty)
 
 
-def resume_project(path: str, terminal_app: str = "Terminal", tty: str | None = None) -> None:
+def resume_project(
+    path: str, terminal_app: str = "Terminal", tty: str | None = None, prompt: str | None = None
+) -> None:
+    """Opens (or refocuses) this project's terminal. `prompt`, when
+    given, is passed to `claude` as its opening message so the session
+    starts working immediately instead of sitting at an empty prompt --
+    used by the placeholder "hand off to Claude" flow.
+
+    A SessionStart hook's `additionalContext` can't do this job on its
+    own: it genuinely does inject text into the new session's context
+    (confirmed live -- the hook fires and emits correct JSON), but
+    Claude Code doesn't take a turn until the user sends a message, so
+    the agent sits silently knowing about the tasks and never mentions
+    them. Passing an actual prompt is what makes it speak."""
     if terminal_app.lower() == "terminal" and tty and _tty_has_live_claude(tty):
         tab = _find_tab_by_tty(tty)
         if tab is not None:
@@ -216,10 +240,13 @@ def resume_project(path: str, terminal_app: str = "Terminal", tty: str | None = 
             return
 
     resolved_path = str(Path(path).resolve())
-    quoted_path = shlex.quote(resolved_path)
+    # Two layers, in this order: shlex.quote for the shell, then
+    # AppleScript escaping for the double-quoted literal wrapping it.
+    quoted_path = _applescript_string(shlex.quote(resolved_path))
+    quoted_prompt = _applescript_string(shlex.quote(prompt)) if prompt else ""
     script = (
         NEW_ITERM_WINDOW_APPLESCRIPT
         if terminal_app.lower() == "iterm"
         else NEW_TERMINAL_WINDOW_APPLESCRIPT
-    ).format(path=quoted_path)
+    ).format(path=quoted_path, prompt=quoted_prompt)
     subprocess.run(["osascript", "-e", script], check=True)

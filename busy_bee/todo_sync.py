@@ -50,6 +50,21 @@ def is_tracked(project_root: Path) -> bool:
     return (project_root / ".claude-dashboard" / "status.json").exists()
 
 
+def seed_state(project_root: Path, texts: list[str], status: str = "pending") -> None:
+    """Pre-populates the content-keyed dedupe state for a set of todo
+    texts, without logging anything to status.json itself. Used when a
+    placeholder project's manual tasks are migrated into a freshly
+    created project on activation (see Api.activate_placeholder_project)
+    -- without this, a later TodoWrite call that happens to reuse one of
+    those exact task strings would see it as never-before-seen (state
+    only gets populated by sync_todos itself) and log a second,
+    duplicate `todo` item alongside the migrated one."""
+    state = _load_state(project_root)
+    for text in texts:
+        state.setdefault(text, status)
+    _save_state(project_root, state)
+
+
 def sync_todos(project_root: Path, todos: list[dict]) -> None:
     if not is_tracked(project_root):
         return

@@ -99,10 +99,17 @@ body {
   display: flex;
   align-items: baseline;
   gap: 6px;
+}
+
+/* Only the clickable case (an open-terminal title, see popover.js's
+   data-open-terminal) gets a pointer cursor and hover underline -- a
+   placeholder card's title-row has neither attribute (there's no
+   terminal to open yet), and shouldn't look like a link. */
+.title-row[data-open-terminal] {
   cursor: pointer;
 }
 
-.title-row:hover .project-name { text-decoration: underline; }
+.title-row[data-open-terminal]:hover .project-name { text-decoration: underline; }
 
 .project-name {
   font-weight: 600;
@@ -301,4 +308,102 @@ body {
 .empty-column {
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* Placeholder projects: manual add-project footer, per-card add-task
+   form, and the checkbox-style toggle -- none of these existed before
+   (no <input>/<button>/<form>/:focus styling anywhere in this file),
+   so everything below is new but expressed entirely in the existing
+   :root tokens, which is why it needs nothing extra under the dark
+   media query. */
+
+.add-project {
+  display: flex;
+  gap: 6px;
+  padding: 0 4px 8px;
+}
+
+.add-project input,
+.task-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.add-project input:focus,
+.task-input:focus {
+  outline: none;
+  border-color: var(--text-muted);
+  box-shadow: 0 0 0 2px rgba(127, 127, 127, 0.18);
+}
+
+.add-project button {
+  font: inherit;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.add-project button:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.add-project.disabled input,
+.add-project.disabled button {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.form-error {
+  color: var(--coral);
+  font-size: 11px;
+  padding: 4px;
+}
+
+.task-add {
+  margin-top: 8px;
+  display: flex;
+}
+
+.check-toggle {
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.check-toggle:hover {
+  background: rgba(127, 127, 127, 0.18);
+}
+
+/* Sits inline in the card header, in place of a real card's clickable
+   title -- sized like the muted metadata it replaces (the old "no
+   folder" pill), not like a full-width row. */
+.create-folder {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.create-folder:hover {
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--text);
+}
+
+.create-folder.disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }

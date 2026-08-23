@@ -157,6 +157,24 @@ def test_untrack_removes_project_from_config_and_db(tmp_path, monkeypatch, capsy
     assert db.get_recent_done("stray-proj") == []
 
 
+def test_untrack_also_forgets_a_retained_dashboard_task_list(tmp_path, monkeypatch, capsys):
+    from busy_bee import placeholder_store
+
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "cfg" / "db.sqlite")
+    db.init_db()
+
+    project_dir = tmp_path / "proj"
+    placeholder_store.create("proj")
+    placeholder_store.add_task("proj", "leftover manual task")
+    config.add_project("proj", str(project_dir))
+    db.upsert_project("proj", str(project_dir))
+    placeholder_store.mark_activated("proj", str(project_dir))
+
+    assert cli.main(["untrack", "proj"]) == 0
+
+    assert placeholder_store.get("proj") is None
+
+
 def test_untrack_unknown_project_still_clears_db(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cfg" / "db.sqlite")
     db.init_db()

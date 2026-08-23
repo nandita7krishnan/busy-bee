@@ -64,6 +64,22 @@ def test_sync_logs_done_once_when_transitioning_to_completed(tmp_path):
     assert len(todo_matches) == 1  # logged once when first seen as pending
 
 
+def test_seeded_state_prevents_a_matching_todowrite_from_duplicating_a_migrated_task(tmp_path):
+    # Simulates a placeholder task migration (Api.activate_placeholder_project
+    # -> todo_sync.seed_state) followed by the agent's own TodoWrite list
+    # happening to contain byte-identical text -- without the seed,
+    # sync_todos would see that text as never-before-seen and log a
+    # second, duplicate todo item alongside the migrated one.
+    project_store.add_item(tmp_path, "todo", "sketch the schema")  # the migrated item
+    todo_sync.seed_state(tmp_path, ["sketch the schema"])
+
+    todo_sync.sync_todos(tmp_path, [{"content": "sketch the schema", "status": "pending"}])
+
+    items = project_store.all_items(tmp_path)
+    matching = [i for i in items if i["type"] == "todo" and i["text"] == "sketch the schema"]
+    assert len(matching) == 1
+
+
 def test_sync_ignores_malformed_entries(tmp_path):
     project_store.add_item(tmp_path, "done", "already tracked")
     todo_sync.sync_todos(

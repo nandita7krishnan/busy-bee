@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from busy_bee import app, config, db, process_utils
+from busy_bee import app, config, db, placeholder_store, process_utils
 
 
 class FakeResult:
@@ -13,8 +13,26 @@ class FakeResult:
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "cfg" / "db.sqlite")
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path / "cfg")
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "cfg" / "config.json")
     db.init_db()
     yield
+
+
+class FakeWindow:
+    """Stands in for the popover's webview.Window -- just enough surface
+    for dialogs.choose_folder (create_file_dialog) and
+    Api.refresh_popover_content (evaluate_js) to have something to call."""
+
+    def __init__(self, folder_result=None):
+        self.folder_result = folder_result  # a list (as pywebview returns) or None
+        self.evaluate_js_calls = []
+
+    def create_file_dialog(self, *args, **kwargs):
+        return self.folder_result
+
+    def evaluate_js(self, script):
+        self.evaluate_js_calls.append(script)
 
 
 def _log(project, item_type, text, tty, created_at, session_id=None, source_id=None):
@@ -348,4 +366,339 @@ def test_session_card_ignores_another_projects_items_on_the_same_tty(monkeypatch
 
     assert [p["name"] for p in projects] == ["proj-b"]
     assert projects[0]["sessions"][0]["done"] == ["work in b"]
+
+
+def test_get_projects_orders_most_recently_active_terminal_first(monkeypatch):
+    # Not alphabetical -- "aaa-oldest" would sort first by name, but the
+    # dashboard is a view of what you're working on now, so the project
+    # whose terminal logged most recently goes on top.
+    # Both within the live sessions' lifetime (started five minutes ago,
+    # per _live_ps) so neither is discarded as predating its tty's
+    # current session -- only their order relative to each other matters.
+    now = datetime.now(timezone.utc)
+    older = (now - timedelta(seconds=60)).isoformat()
+    newer = (now - timedelta(seconds=10)).isoformat()
+    db.upsert_project("aaa-oldest", "/tmp/aaa")
+    db.upsert_project("zzz-newest", "/tmp/zzz")
+    _log("aaa-oldest", "done", "long ago", "ttys001", older, source_id="a1")
+    _log("zzz-newest", "done", "just now", "ttys002", newer, source_id="b1")
+
+    monkeypatch.setattr(process_utils.subprocess, "run", _live_ps("ttys001", "ttys002"))
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+
+    projects = app.Api().get_projects()
+
+    assert [p["name"] for p in projects] == ["zzz-newest", "aaa-oldest"]
+
+
+def test_get_projects_does_not_leak_the_internal_sort_key(monkeypatch):
+    db.upsert_project("proj", "/tmp/proj")
+    _log("proj", "done", "did a thing", "ttys009", "2026-08-15T00:00:00+00:00")
+    monkeypatch.setattr(
+        process_utils.subprocess, "run", lambda cmd, **k: FakeResult(stdout="ttys009 claude\n")
+    )
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+
+    assert "_last_active" not in app.Api().get_projects()[0]
+
+
+# --- placeholder projects ---------------------------------------------
+
+
+def _no_live_claude(monkeypatch):
+    monkeypatch.setattr(process_utils.subprocess, "run", lambda cmd, **k: FakeResult(stdout=""))
+
+
+def test_get_projects_output_is_unchanged_when_there_are_no_placeholders(monkeypatch):
+    # Regression guard: with zero placeholders, get_projects()'s output
+    # must be byte-identical to before this feature existed.
+    db.upsert_project("live-proj", "/tmp/live-proj")
+    _log("live-proj", "done", "shipped it", "ttys009", "2026-08-15T00:00:00+00:00")
+    monkeypatch.setattr(
+        process_utils.subprocess, "run", lambda cmd, **k: FakeResult(stdout="ttys009 claude\n")
+    )
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+
+    projects = app.Api().get_projects()
+    assert len(projects) == 1
+    assert projects[0]["placeholder"] is False
+    assert projects[0]["done"] == []
+    assert projects[0]["todo"] == []
+
+
+def test_get_projects_does_not_treat_legacy_agent_items_as_dashboard_tasks(monkeypatch):
+    # Regression test: a real agent-logged 'done' item with no
+    # terminal_tty or session_id recorded (predates that tracking being
+    # reliable, or logged from a non-terminal context) must not be
+    # mistaken for a migrated placeholder task -- confirmed live against
+    # this repo's own history, which has exactly this shape from before
+    # session tracking existed. The distinguishing signal is source
+    # ('human' vs 'agent'), not a null tty/session_id.
+    db.upsert_project("proj", "/tmp/proj")
+    db.upsert_item(
+        project="proj", item_type="done", text="legacy agent work",
+        created_at="2026-08-15T05:44:42+00:00", resolved_at=None,
+        source="agent", source_id="legacy1", terminal_tty=None, session_id=None,
+    )
+    monkeypatch.setattr(
+        process_utils.subprocess, "run", lambda cmd, **k: FakeResult(stdout="ttys009 claude\n")
+    )
+    db.upsert_item(
+        project="proj", item_type="done", text="live work",
+        created_at="2026-08-15T06:00:00+00:00", resolved_at=None,
+        source="agent", source_id="live1", terminal_tty="ttys009", session_id="s1",
+    )
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+
+    project = app.Api().get_projects()[0]
+
+    assert project["done"] == []
+    assert project["todo"] == []
+
+
+def test_get_projects_returns_placeholder_card_with_no_live_session(monkeypatch):
+    _no_live_claude(monkeypatch)
+    placeholder_store.create("someday-project")
+
+    projects = app.Api().get_projects()
+
+    assert len(projects) == 1
+    assert projects[0]["name"] == "someday-project"
+    assert projects[0]["placeholder"] is True
+    assert projects[0]["path"] is None
+    assert projects[0]["sessions"] == []
+
+
+def test_placeholder_card_lists_manual_tasks_as_objects_with_ids(monkeypatch):
+    _no_live_claude(monkeypatch)
+    placeholder_store.create("proj")
+    task = placeholder_store.add_task("proj", "sketch the schema")
+
+    project = app.Api().get_projects()[0]
+
+    assert project["todo"] == [{"id": task["id"], "text": "sketch the schema"}]
+    assert project["done"] == []
+
+
+def test_checking_a_manual_task_moves_it_from_the_todo_to_the_done_column(monkeypatch):
+    _no_live_claude(monkeypatch)
+    placeholder_store.create("proj")
+    task = placeholder_store.add_task("proj", "write tests")
+
+    api = app.Api()
+    result = api.set_placeholder_task_done("proj", task["id"], True)
+    assert result["ok"] is True
+
+    project = api.get_projects()[0]
+    assert project["todo"] == []
+    assert project["done"] == [{"id": task["id"], "text": "write tests"}]
+
+
+def test_unchecking_a_manual_task_moves_it_back_to_the_todo_column(monkeypatch):
+    _no_live_claude(monkeypatch)
+    placeholder_store.create("proj")
+    task = placeholder_store.add_task("proj", "write tests")
+
+    api = app.Api()
+    api.set_placeholder_task_done("proj", task["id"], True)
+    api.set_placeholder_task_done("proj", task["id"], False)
+
+    project = api.get_projects()[0]
+    assert project["todo"] == [{"id": task["id"], "text": "write tests"}]
+    assert project["done"] == []
+
+
+def test_add_placeholder_project_rejects_duplicate_name(monkeypatch):
+    api = app.Api()
+    assert api.add_placeholder_project("dup")["ok"] is True
+    result = api.add_placeholder_project("dup")
+    assert result["ok"] is False
+    assert "error" in result
+
+
+def test_remove_placeholder_project_deletes_it(monkeypatch):
+    api = app.Api()
+    api.add_placeholder_project("proj")
+    assert api.remove_placeholder_project("proj")["ok"] is True
+    assert placeholder_store.get("proj") is None
+
+
+def test_activate_placeholder_creates_the_folder_and_registers_the_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: False)
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+
+    result = api.activate_placeholder_project("proj")
+
+    assert result["ok"] is True
+    target = tmp_path / "proj"
+    assert target.is_dir()
+    assert (target / ".claude-dashboard" / "status.json").exists()
+    assert config.list_projects() == [{"name": "proj", "path": str(target)}]
+    assert db.get_project("proj") is not None
+
+
+def test_activate_placeholder_migrates_tasks_into_status_json_when_accepted(tmp_path, monkeypatch):
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: True)
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+    placeholder_store.add_task("proj", "sketch the schema")
+
+    result = api.activate_placeholder_project("proj")
+
+    assert result["ok"] is True
+    assert result["handed_off"] is True
+    assert result["migrated"] == 1
+
+    from busy_bee import project_store
+
+    items = project_store.all_items(tmp_path / "proj")
+    todo_items = [i for i in items if i["type"] == "todo"]
+    assert len(todo_items) == 1
+    assert todo_items[0]["text"] == "sketch the schema"
+    assert todo_items[0]["source"] == "human"
+    assert todo_items[0]["terminal_tty"] is None
+    assert todo_items[0]["session_id"] is None
+
+    # The placeholder record's job is done -- migrated, not retained.
+    assert placeholder_store.get("proj") is None
+
+
+def test_accepted_handoff_opens_the_terminal_with_a_prompt_naming_the_tasks(tmp_path, monkeypatch):
+    # The SessionStart hook's additionalContext injects the task list
+    # but can't make Claude speak first -- Claude Code takes no turn
+    # until a message arrives. Passing an opening prompt is what
+    # actually makes the handoff visible to the user.
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: True)
+    calls = []
+    monkeypatch.setattr(
+        app.terminal_launcher,
+        "resume_project",
+        lambda *a, **k: calls.append((a, k)),
+    )
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+    placeholder_store.add_task("proj", "sketch the schema")
+
+    api.activate_placeholder_project("proj")
+
+    assert len(calls) == 1
+    prompt = calls[0][1]["prompt"]
+    assert "sketch the schema" in prompt
+    assert "dashctl resolve todo" in prompt
+
+
+def test_declined_handoff_does_not_open_a_terminal(tmp_path, monkeypatch):
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: False)
+    calls = []
+    monkeypatch.setattr(
+        app.terminal_launcher, "resume_project", lambda *a, **k: calls.append((a, k))
+    )
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+    placeholder_store.add_task("proj", "sketch the schema")
+
+    api.activate_placeholder_project("proj")
+
+    assert calls == []
+
+
+def test_activate_placeholder_keeps_tasks_dashboard_only_when_declined(tmp_path, monkeypatch):
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: False)
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+    placeholder_store.add_task("proj", "sketch the schema")
+
+    result = api.activate_placeholder_project("proj")
+
+    assert result["ok"] is True
+    assert result["handed_off"] is False
+
+    from busy_bee import project_store
+
+    assert project_store.all_items(tmp_path / "proj") == []
+
+    record = placeholder_store.get("proj")
+    assert record is not None
+    assert record["activated_path"] == str(tmp_path / "proj")
+
+    # And it still surfaces on the now-real project's card.
+    _no_live_claude(monkeypatch)
+    project = api.get_projects()[0]
+    assert project["placeholder"] is False
+    assert [t["text"] for t in project["todo"]] == ["sketch the schema"]
+
+
+def test_activate_placeholder_does_nothing_when_the_folder_picker_is_cancelled(tmp_path, monkeypatch):
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=None)  # user cancelled
+    api.add_placeholder_project("proj")
+
+    result = api.activate_placeholder_project("proj")
+
+    assert result == {"ok": False, "cancelled": True}
+    assert not (tmp_path / "proj").exists()
+    assert placeholder_store.get("proj")["activated_path"] is None
+    assert config.list_projects() == []
+
+
+def test_activate_placeholder_refuses_when_the_target_folder_already_exists_and_is_not_empty(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "proj"
+    target.mkdir()
+    (target / "some_file.txt").write_text("already here")
+
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+
+    result = api.activate_placeholder_project("proj")
+
+    assert result["ok"] is False
+    assert "error" in result
+    assert config.list_projects() == []
+
+
+def test_activate_placeholder_refuses_a_name_already_tracked_as_a_project(tmp_path, monkeypatch):
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+
+    # Simulates config.auto_register claiming the name from another
+    # terminal in between the card being created and Create Folder
+    # being clicked.
+    config.add_project("proj", str(tmp_path / "elsewhere"))
+
+    result = api.activate_placeholder_project("proj")
+
+    assert result["ok"] is False
+    assert not (tmp_path / "proj").exists()
+
+
+def test_activate_placeholder_carve_out_keeps_the_card_visible_before_its_first_session(
+    tmp_path, monkeypatch
+):
+    # The visibility fix this whole feature depends on: without it, the
+    # card the user just created a folder for would immediately vanish
+    # (app.py's ordinary "no live session -> skip" rule), which is the
+    # worst possible moment for that to happen.
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: False)
+    _no_live_claude(monkeypatch)
+    api = app.Api()
+    api.popover_window = FakeWindow(folder_result=[str(tmp_path)])
+    api.add_placeholder_project("proj")
+
+    api.activate_placeholder_project("proj")
+
+    projects = api.get_projects()
+    assert len(projects) == 1
+    assert projects[0]["name"] == "proj"
+    assert projects[0]["placeholder"] is False
+    assert projects[0]["sessions"] == []
 
