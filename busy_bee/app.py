@@ -322,6 +322,26 @@ class Api:
         # dashctl untrack only reaches config.json + the sqlite store
         # (cli.cmd_untrack), so without this a mistyped placeholder card
         # would otherwise be permanently stuck with no way to remove it.
+        #
+        # A card carrying tasks asks first: those tasks exist nowhere
+        # else (no status.json, no folder on disk -- see
+        # placeholder_store's module docstring), so deleting the card
+        # is the only irreversible action on this dashboard. An empty
+        # card has nothing to lose, so it just goes.
+        record = placeholder_store.get(project_name)
+        if record is None:
+            return {"ok": False, "error": "no such placeholder project"}
+        if record["tasks"]:
+            with self._dialog_lock:
+                confirmed = dialogs.confirm(
+                    f'Delete "{project_name}"?',
+                    f"{len(record['tasks'])} task(s) on this card will be deleted "
+                    "with it. Nothing on disk is touched.",
+                    "Delete",
+                    "Keep",
+                )
+            if not confirmed:
+                return {"ok": False, "cancelled": True}
         return {"ok": placeholder_store.delete(project_name)}
 
     def add_placeholder_task(self, project_name: str, text: str) -> dict:
@@ -333,6 +353,12 @@ class Api:
 
     def set_placeholder_task_done(self, project_name: str, task_id: str, done: bool) -> dict:
         return {"ok": placeholder_store.set_task_resolved(project_name, task_id, done)}
+
+    def delete_placeholder_task(self, project_name: str, task_id: str) -> dict:
+        # No confirmation: one task is small enough to just retype, and
+        # the delete control only appears on hover over the row it
+        # belongs to, so it's hard to hit by accident.
+        return {"ok": placeholder_store.delete_task(project_name, task_id)}
 
     def activate_placeholder_project(self, project_name: str) -> dict:
         """The "Create folder" flow -- turns a placeholder card into a real,
