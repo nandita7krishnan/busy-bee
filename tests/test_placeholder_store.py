@@ -106,6 +106,26 @@ def test_set_task_resolved_returns_false_for_unknown_task_id():
     assert placeholder_store.set_task_resolved("proj", "does-not-exist", True) is False
 
 
+def test_delete_task_removes_only_that_task():
+    placeholder_store.create("proj")
+    keep = placeholder_store.add_task("proj", "keep me")
+    drop = placeholder_store.add_task("proj", "drop me")
+
+    assert placeholder_store.delete_task("proj", drop["id"]) is True
+
+    remaining = placeholder_store.get("proj")["tasks"]
+    assert [t["id"] for t in remaining] == [keep["id"]]
+
+
+def test_delete_task_returns_false_for_unknown_task_id():
+    placeholder_store.create("proj")
+    assert placeholder_store.delete_task("proj", "does-not-exist") is False
+
+
+def test_delete_task_returns_false_for_unknown_project():
+    assert placeholder_store.delete_task("nope", "some-id") is False
+
+
 def test_set_task_resolved_returns_false_for_unknown_project():
     assert placeholder_store.set_task_resolved("nope", "some-id", True) is False
 

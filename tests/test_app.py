@@ -508,6 +508,24 @@ def test_unchecking_a_manual_task_moves_it_back_to_the_todo_column(monkeypatch):
     assert project["done"] == []
 
 
+def test_deleting_a_manual_task_drops_it_from_the_card(monkeypatch):
+    _no_live_claude(monkeypatch)
+    placeholder_store.create("proj")
+    keep = placeholder_store.add_task("proj", "keep me")
+    drop = placeholder_store.add_task("proj", "drop me")
+
+    api = app.Api()
+    assert api.delete_placeholder_task("proj", drop["id"])["ok"] is True
+
+    project = api.get_projects()[0]
+    assert project["todo"] == [{"id": keep["id"], "text": "keep me"}]
+
+
+def test_delete_placeholder_task_reports_failure_for_unknown_task(monkeypatch):
+    placeholder_store.create("proj")
+    assert app.Api().delete_placeholder_task("proj", "nope")["ok"] is False
+
+
 def test_add_placeholder_project_rejects_duplicate_name(monkeypatch):
     api = app.Api()
     assert api.add_placeholder_project("dup")["ok"] is True
@@ -521,6 +539,51 @@ def test_remove_placeholder_project_deletes_it(monkeypatch):
     api.add_placeholder_project("proj")
     assert api.remove_placeholder_project("proj")["ok"] is True
     assert placeholder_store.get("proj") is None
+
+
+def test_remove_placeholder_project_with_tasks_asks_first(monkeypatch):
+    asked = {}
+
+    def fake_confirm(message, informative, ok_title, cancel_title):
+        asked["message"] = message
+        return True
+
+    monkeypatch.setattr(app.dialogs, "confirm", fake_confirm)
+    api = app.Api()
+    api.add_placeholder_project("proj")
+    placeholder_store.add_task("proj", "something worth losing")
+
+    assert api.remove_placeholder_project("proj")["ok"] is True
+    assert "proj" in asked["message"]
+    assert placeholder_store.get("proj") is None
+
+
+def test_remove_placeholder_project_keeps_the_card_when_the_confirm_is_declined(monkeypatch):
+    monkeypatch.setattr(app.dialogs, "confirm", lambda *a, **k: False)
+    api = app.Api()
+    api.add_placeholder_project("proj")
+    placeholder_store.add_task("proj", "something worth losing")
+
+    result = api.remove_placeholder_project("proj")
+
+    assert result["ok"] is False
+    assert result["cancelled"] is True
+    assert placeholder_store.get("proj") is not None
+
+
+def test_remove_placeholder_project_with_no_tasks_skips_the_confirm(monkeypatch):
+    def explode(*args, **kwargs):
+        raise AssertionError("an empty card should not prompt")
+
+    monkeypatch.setattr(app.dialogs, "confirm", explode)
+    api = app.Api()
+    api.add_placeholder_project("proj")
+
+    assert api.remove_placeholder_project("proj")["ok"] is True
+
+
+def test_remove_placeholder_project_reports_an_unknown_card(monkeypatch):
+    assert app.Api().remove_placeholder_project("nope")["ok"] is False
 
 
 def test_activate_placeholder_creates_the_folder_and_registers_the_project(tmp_path, monkeypatch):

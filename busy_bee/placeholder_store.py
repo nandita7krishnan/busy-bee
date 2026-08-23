@@ -176,6 +176,29 @@ def delete(name: str) -> bool:
         return True
 
 
+def delete_task(name: str, task_id: str) -> bool:
+    """Removes a manual task outright -- the counterpart to
+    set_task_resolved for something that shouldn't have been queued at
+    all, rather than something that got done.
+
+    Scoped here for the same reason un-resolving is: only tasks the
+    user typed into the dashboard can be deleted from it. Agent-logged
+    items stay a read-only mirror of what actually happened in the
+    terminal, and deleting one here would just make the card disagree
+    with the session it's mirroring."""
+    with _LOCK:
+        placeholders = load()
+        record = next((p for p in placeholders if p["name"] == name), None)
+        if record is None:
+            return False
+        remaining = [t for t in record["tasks"] if t["id"] != task_id]
+        if len(remaining) == len(record["tasks"]):
+            return False
+        record["tasks"] = remaining
+        _save(placeholders)
+        return True
+
+
 def mark_activated(name: str, path: str) -> None:
     """Records that this placeholder's folder now exists at `path`,
     without deleting the record -- used when the user declines the

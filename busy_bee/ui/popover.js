@@ -37,7 +37,15 @@ function renderColumn(title, items, className, emptyLabel, interactive) {
           const checkSpan = interactive
             ? `<span class="check check-toggle" data-toggle-task data-task-id="${escapeHtml(entry.id)}" role="checkbox" tabindex="0" aria-checked="${className === "done"}">${check}</span>`
             : `<span class="check">${check}</span>`;
-          return `<li>${checkSpan}<span class="item-text" title="${safe}">${safe}</span></li>`;
+          // Same `interactive` gate as the checkbox: a manual task can
+          // be deleted because the user typed it, an agent-logged one
+          // can't -- the card would then disagree with the terminal
+          // it's mirroring. Hidden until the row is hovered/focused so
+          // a column of tasks doesn't read as a column of × buttons.
+          const deleteSpan = interactive
+            ? `<span class="task-delete" data-delete-task data-task-id="${escapeHtml(entry.id)}" role="button" tabindex="0" title="Delete this task" aria-label="Delete task">&times;</span>`
+            : "";
+          return `<li>${checkSpan}<span class="item-text" title="${safe}">${safe}</span>${deleteSpan}</li>`;
         })
         .join("")
     : `<li class="empty-column">${emptyLabel}</li>`;
@@ -124,6 +132,8 @@ function renderPlaceholderCard(project) {
           </span>
         </div>
         <span class="add-task-btn" data-focus-task title="Add a task">+ Task</span>
+        <span class="delete-project-btn" data-delete-project role="button" tabindex="0"
+              title="Delete this card" aria-label="Delete this card">&times;</span>
       </div>
       <div class="card-body">
         <div class="columns">
@@ -270,6 +280,7 @@ function render(projects) {
       if (e.target.closest("[data-open-terminal]")) return;
       if (e.target.closest("[data-create-folder]")) return;
       if (e.target.closest("[data-focus-task]")) return;
+      if (e.target.closest("[data-delete-project]")) return;
       header.closest(".card").classList.toggle("expanded");
     });
   });
@@ -334,6 +345,58 @@ function render(projects) {
         e.preventDefault();
         e.stopPropagation();
         toggle();
+      }
+    });
+  });
+
+  cardsEl.querySelectorAll("[data-delete-task]").forEach((el) => {
+    const remove = async () => {
+      const card = el.closest(".card");
+      await window.pywebview.api.delete_placeholder_task(
+        card.dataset.project,
+        el.dataset.taskId
+      );
+      loadProjects();
+    };
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      remove();
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        remove();
+      }
+    });
+  });
+
+  cardsEl.querySelectorAll("[data-delete-project]").forEach((el) => {
+    const remove = async () => {
+      // A card with tasks puts up a native confirm on the Python side
+      // (Api.remove_placeholder_project); an empty one just goes. Either
+      // way the refresh below is what makes it disappear.
+      if (el.classList.contains("disabled")) return; // that confirm is a
+      // modal dialog, so the same one-at-a-time rule as "Create folder"
+      // applies while it's up
+      el.classList.add("disabled");
+      try {
+        await window.pywebview.api.remove_placeholder_project(
+          el.closest(".card").dataset.project
+        );
+      } finally {
+        loadProjects();
+      }
+    };
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      remove();
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        remove();
       }
     });
   });

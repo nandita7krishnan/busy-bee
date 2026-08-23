@@ -217,6 +217,34 @@ body {
   text-decoration: line-through;
 }
 
+/* Manual tasks only (popover.js gates it on `interactive`). Kept
+   invisible rather than absent until the row is hovered or the button
+   itself is focused -- reserving the space with opacity, not
+   display:none, so revealing it doesn't reflow the text beside it.
+   :focus-within keeps it reachable by keyboard, where there's no
+   hover to trigger. */
+.column li .task-delete {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1.1;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.column li:hover .task-delete,
+.column li .task-delete:focus {
+  opacity: 0.7;
+}
+
+.column li .task-delete:hover {
+  opacity: 1;
+  color: var(--badge-bg);
+}
+
 .sessions-row {
   display: flex;
   flex-wrap: wrap;
@@ -430,4 +458,35 @@ body {
 .add-task-btn:hover {
   background: rgba(127, 127, 127, 0.12);
   color: var(--text);
+}
+
+/* Deleting the whole card is the destructive one, so unlike "+ Task"
+   it stays faint until the card is hovered -- present when you go
+   looking, not competing with the card's own content otherwise. */
+.delete-project-btn {
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 1px 5px 3px;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.card:hover .delete-project-btn,
+.delete-project-btn:focus {
+  opacity: 0.6;
+}
+
+.delete-project-btn:hover {
+  opacity: 1;
+  color: var(--badge-bg);
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.delete-project-btn.disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }
