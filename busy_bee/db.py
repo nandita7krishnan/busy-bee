@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from busy_bee import config
+from busy_bee import config, process_utils
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -308,17 +308,27 @@ def get_project_ttys(project: str) -> list[str]:
         return [r["terminal_tty"] for r in rows]
 
 
-def current_project_by_tty() -> dict[str, str]:
+def current_project_by_tty(session_started_at: dict[str, str] | None = None) -> dict[str, str]:
     """For every tty that has ever logged an item, the single project it
     logged to *most recently* -- i.e. the project a still-live tty is
     actually sitting in right now, not just one it visited at some point.
     Used to stop a project from showing a live session forever after the
     conversation `cd`s away to a different tracked project without the
-    terminal itself closing (see get_project_ttys)."""
+    terminal itself closing (see get_project_ttys).
+
+    `session_started_at` (tty -> ISO8601 timestamp, from
+    process_utils.claude_session_start_times) drops any tty whose most
+    recent item predates the `claude` process now running on it: those
+    items were logged by an earlier session that has since exited and
+    left its tty to be reused, so the tty belongs to no project at all
+    until its current session logs something of its own. Without this,
+    a new session in a directory busy-bee doesn't track yet inherits
+    whichever project last used that tty number. Ttys missing from the
+    mapping are left unfiltered."""
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT i.terminal_tty AS tty, i.project AS project
+            SELECT i.terminal_tty AS tty, i.project AS project, i.created_at AS created_at
             FROM items i
             WHERE i.terminal_tty IS NOT NULL
               AND i.created_at = (
@@ -327,7 +337,14 @@ def current_project_by_tty() -> dict[str, str]:
               )
             """
         ).fetchall()
-        return {r["tty"]: r["project"] for r in rows}
+        started_at = session_started_at or {}
+        return {
+            r["tty"]: r["project"]
+            for r in rows
+            if not process_utils.logged_before_session_start(
+                r["created_at"], started_at.get(r["tty"])
+            )
+        }
 
 
 def get_unresolved(project: str, item_type: str) -> list[sqlite3.Row]:

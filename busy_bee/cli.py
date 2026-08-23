@@ -14,9 +14,10 @@ it when wrapping up a chunk of work or a session, to capture "where
 things stand" in a sentence.
 
 The current directory is auto-registered as a tracked project the
-first time any of the log commands runs -- no separate init step
-needed once `dashctl setup-global` has wired up the CLAUDE.md snippet
-and Stop hook globally (see global_setup.py).
+first time any of the log commands runs (and, earlier still, by the
+SessionStart hook as soon as a session opens in it) -- no separate
+init step needed once `dashctl setup-global` has wired up the
+CLAUDE.md snippet and hooks globally (see global_setup.py).
 
 Also:
 
@@ -48,22 +49,6 @@ def _project_root() -> Path:
     return Path.cwd().resolve()
 
 
-def _auto_register(root: Path) -> None:
-    """Registers the project under its directory name if it isn't
-    already tracked. A no-op (besides a cheap config read) if it is.
-
-    Skips the home directory itself -- a Claude Code session run
-    directly in $HOME (not inside an actual project) would otherwise
-    silently register "yourusername" as a tracked project. `dashctl
-    init` still allows it explicitly, if that's really what's wanted.
-    """
-    if root == Path.home():
-        return
-    known_paths = {p["path"] for p in config.list_projects()}
-    if str(root) not in known_paths:
-        config.add_project(root.name, str(root))
-
-
 _LOG_TYPES = ("done", "todo", "blocker", "question", "summary")
 
 # Matches the "aim for under 12 words" guidance in claude_md_snippet.md.
@@ -78,7 +63,7 @@ _CONCISE_WORD_LIMIT = 12
 
 def cmd_log(item_type: str, text: str) -> int:
     root = _project_root()
-    _auto_register(root)
+    config.auto_register(root)
     item = project_store.add_item(root, item_type, text)  # type: ignore[arg-type]
     if item_type in ("blocker", "question", "todo"):
         print(f"logged {item_type} [{item['id']}]: {text}")

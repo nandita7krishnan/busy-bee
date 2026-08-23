@@ -16,6 +16,13 @@ def no_real_tty_lookup(monkeypatch):
     yield
 
 
+def _now_plus(seconds: int) -> str:
+    """An ISO timestamp `seconds` from now -- positive for a session
+    that started after the items under test were logged (a reused tty),
+    negative for one that was already running."""
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
 def test_add_item_creates_status_file(tmp_path):
     item = project_store.add_item(tmp_path, "done", "shipped the thing")
     assert item["type"] == "done"
@@ -55,6 +62,52 @@ def test_auto_resolve_dead_sessions_leaves_live_tty_alone(tmp_path, monkeypatch)
     assert changed is False
     still_open = next(i for i in project_store.all_items(tmp_path) if i["id"] == item["id"])
     assert still_open["resolved_at"] is None
+
+
+def test_auto_resolve_dead_sessions_clears_flag_left_on_a_reused_tty(tmp_path, monkeypatch):
+    # The tty is live again -- but with a *different* session on it, one
+    # that started after this flag was logged. The session that raised it
+    # is gone and can't answer it, same as if the terminal had closed.
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    item = project_store.add_item(tmp_path, "question", "old session's question")
+
+    changed = project_store.auto_resolve_dead_sessions(
+        tmp_path,
+        live_ttys={"ttys002"},
+        session_started_at={"ttys002": _now_plus(seconds=60)},
+    )
+
+    assert changed is True
+    resolved = next(i for i in project_store.all_items(tmp_path) if i["id"] == item["id"])
+    assert resolved["resolved_at"] is not None
+
+
+def test_auto_resolve_dead_sessions_keeps_flags_from_the_session_still_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    item = project_store.add_item(tmp_path, "blocker", "this session's blocker")
+
+    changed = project_store.auto_resolve_dead_sessions(
+        tmp_path,
+        live_ttys={"ttys002"},
+        session_started_at={"ttys002": _now_plus(seconds=-60)},
+    )
+
+    assert changed is False
+    still_open = next(i for i in project_store.all_items(tmp_path) if i["id"] == item["id"])
+    assert still_open["resolved_at"] is None
+
+
+def test_auto_resolve_dead_sessions_keeps_flags_when_start_time_is_unknown(tmp_path, monkeypatch):
+    # No start time for this tty (unparseable `ps` output, say) -- fall
+    # back to liveness alone rather than resolving something live.
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    project_store.add_item(tmp_path, "blocker", "still open")
+
+    changed = project_store.auto_resolve_dead_sessions(
+        tmp_path, live_ttys={"ttys002"}, session_started_at={"ttys099": _now_plus(seconds=60)}
+    )
+
+    assert changed is False
 
 
 def test_auto_resolve_dead_sessions_ignores_items_without_tty(tmp_path):

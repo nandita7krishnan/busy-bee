@@ -117,3 +117,92 @@ def test_no_session_id_and_nothing_logged_blocks_generally(monkeypatch, capsys, 
 
     assert result["decision"] == "block"
     assert "dashctl done" in result["reason"]
+
+
+def _write_transcript(tmp_path, assistant_text):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": assistant_text}]},
+            }
+        )
+        + "\n"
+    )
+    return transcript
+
+
+def test_trailing_question_requires_dashctl_question_even_if_something_else_logged(
+    monkeypatch, capsys, tmp_path
+):
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    # A done/summary earlier this turn already satisfies the generic
+    # check, but the turn ends on a question -- that must still block.
+    project_store.add_item(tmp_path, "done", "tuned the prompts")
+    transcript = _write_transcript(tmp_path, "Want me to go ahead and do that now?")
+
+    result = _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)})
+
+    assert result["decision"] == "block"
+    assert "dashctl question" in result["reason"]
+
+
+def test_trailing_question_satisfied_once_a_question_is_logged(monkeypatch, capsys, tmp_path):
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    project_store.add_item(tmp_path, "done", "tuned the prompts")
+    project_store.add_item(tmp_path, "question", "want me to go ahead and do that now?")
+    transcript = _write_transcript(tmp_path, "Want me to go ahead and do that now?")
+
+    assert _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)}) is None
+
+
+def test_waiting_phrase_without_question_mark_also_blocks(monkeypatch, capsys, tmp_path):
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    project_store.add_item(tmp_path, "done", "tuned the prompts")
+    transcript = _write_transcript(tmp_path, "Let me know how you'd like to proceed.")
+
+    result = _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)})
+
+    assert result["decision"] == "block"
+    assert "dashctl question" in result["reason"]
+
+
+def test_non_question_ending_does_not_require_a_question(monkeypatch, capsys, tmp_path):
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    project_store.add_item(tmp_path, "done", "tuned the prompts")
+    transcript = _write_transcript(tmp_path, "Tuned both prompts and reran the smoke test; all green.")
+
+    assert _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)}) is None
+
+
+def test_quoted_question_earlier_in_message_does_not_false_positive(monkeypatch, capsys, tmp_path):
+    # The message recaps/quotes an earlier question but itself ends on
+    # a plain statement -- must not require dashctl question.
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    project_store.add_item(tmp_path, "done", "tuned the prompts")
+    transcript = _write_transcript(
+        tmp_path,
+        'This should have caught the exact case from earlier -- "Want me to go ahead '
+        "and do that now?\" will now force a `dashctl question` call before the turn can end.",
+    )
+
+    assert _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)}) is None
+
+
+def test_missing_transcript_path_skips_question_check(monkeypatch, capsys, tmp_path):
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    project_store.add_item(tmp_path, "done", "tuned the prompts")
+    assert _run(monkeypatch, capsys, tmp_path) is None

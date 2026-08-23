@@ -5,7 +5,7 @@ dashboard across side projects). Before doing anything else in a
 session, confirm `dashctl` is on PATH (`which dashctl`); if it's
 missing, skip the rest of this section and mention it in your response
 once. No setup is needed beyond that -- the current directory
-auto-registers itself the first time any command below runs.
+auto-registers itself when the session starts.
 
 Log status as you work, using one-line, plain-language descriptions.
 **Keep every line short -- aim for under 12 words, one clause, no

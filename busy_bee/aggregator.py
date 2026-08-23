@@ -30,13 +30,18 @@ def derive_status(items: list[dict]) -> str:
     return "idle"
 
 
-def sync_project(name: str, path: str, live_ttys: frozenset[str] = frozenset()) -> None:
+def sync_project(
+    name: str,
+    path: str,
+    live_ttys: frozenset[str] = frozenset(),
+    session_started_at: dict[str, str] | None = None,
+) -> None:
     root = Path(path)
-    # Clears blockers/questions whose terminal has since closed *before*
+    # Clears blockers/questions whose session has since ended *before*
     # reading items for this pass -- otherwise db.upsert_item would just
     # overwrite any resolution back to unresolved from the still-open
     # local file on the very next poll.
-    project_store.auto_resolve_dead_sessions(root, live_ttys)
+    project_store.auto_resolve_dead_sessions(root, live_ttys, session_started_at)
     items = project_store.all_items(root)
     for item in items:
         db.upsert_item(
@@ -82,12 +87,13 @@ def sync_all() -> int:
     db.init_db()
     projects = config.list_projects()
     live_ttys = process_utils.live_claude_ttys()
+    session_started_at = process_utils.claude_session_start_times()
     terminal_launcher.prune_colored_ttys(live_ttys)
 
     synced = []
     for p in projects:
         try:
-            sync_project(p["name"], p["path"], live_ttys)
+            sync_project(p["name"], p["path"], live_ttys, session_started_at)
         except FileNotFoundError:
             # project directory moved/deleted -- leave last-known state alone
             continue
@@ -95,8 +101,11 @@ def sync_all() -> int:
 
     # Computed once, after every project's items are upserted, so
     # ownership reflects this whole pass rather than whichever project
-    # happened to be processed first.
-    current_project_by_tty = db.current_project_by_tty()
+    # happened to be processed first. Session start times go in too, so
+    # a tty whose newest item predates the `claude` now running on it
+    # (i.e. the tty number was reused by an unrelated session) doesn't
+    # get its old project's tab color repainted onto the new terminal.
+    current_project_by_tty = db.current_project_by_tty(session_started_at)
     for p in synced:
         sync_session_state(p["name"], live_ttys, current_project_by_tty)
 

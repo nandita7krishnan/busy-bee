@@ -85,5 +85,30 @@ def list_projects() -> list[ProjectConfig]:
     return load_config().get("projects", [])
 
 
+def auto_register(project_root: Path) -> bool:
+    """Registers a directory under its own name if it isn't already
+    tracked, so a project starts appearing on the dashboard the moment
+    someone works in it -- no separate `dashctl init` step. Returns
+    True if it was newly registered.
+
+    Lives here rather than in cli.py because two entry points need the
+    exact same rule: `dashctl <log command>` (cli.py) and the
+    SessionStart hook, which registers as soon as a session opens in an
+    untracked directory instead of waiting for its first log.
+
+    Skips the home directory itself -- a Claude Code session run
+    directly in $HOME (not inside an actual project) would otherwise
+    silently register "yourusername" as a tracked project. `dashctl
+    init` still allows it explicitly, if that's really what's wanted.
+    """
+    root = Path(project_root).expanduser().resolve()
+    if root == Path.home():
+        return False
+    if str(root) in {p["path"] for p in list_projects()}:
+        return False
+    add_project(root.name, str(root))
+    return True
+
+
 def project_status_path(project_path: str | Path) -> Path:
     return Path(project_path) / PROJECT_STATUS_DIR / PROJECT_STATUS_FILE

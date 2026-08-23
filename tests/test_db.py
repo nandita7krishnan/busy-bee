@@ -270,6 +270,29 @@ def test_current_project_by_tty_keeps_separate_ttys_independent():
     assert db.current_project_by_tty() == {"ttys001": "p1", "ttys002": "p2"}
 
 
+def test_current_project_by_tty_drops_ttys_whose_items_predate_the_live_session():
+    # ttys002's `claude` started at 11:00, so the 10:00 items on it were
+    # logged by an earlier session that has since exited and left the
+    # tty number to be reused -- the new occupant belongs to no project
+    # until it logs something itself.
+    db.upsert_item("old-proj", "done", "old work", "2026-08-14T10:00:00+00:00", None, "agent", "a1", terminal_tty="ttys002")
+
+    assert db.current_project_by_tty({"ttys002": "2026-08-14T11:00:00+00:00"}) == {}
+
+
+def test_current_project_by_tty_keeps_items_logged_by_the_live_session():
+    db.upsert_item("proj", "done", "old work", "2026-08-14T10:00:00+00:00", None, "agent", "a1", terminal_tty="ttys002")
+    db.upsert_item("proj", "done", "current work", "2026-08-14T11:30:00+00:00", None, "agent", "a2", terminal_tty="ttys002")
+
+    assert db.current_project_by_tty({"ttys002": "2026-08-14T11:00:00+00:00"}) == {"ttys002": "proj"}
+
+
+def test_current_project_by_tty_leaves_ttys_with_unknown_start_time_alone():
+    db.upsert_item("proj", "done", "work", "2026-08-14T10:00:00+00:00", None, "agent", "a1", terminal_tty="ttys002")
+
+    assert db.current_project_by_tty({"ttys009": "2026-08-14T11:00:00+00:00"}) == {"ttys002": "proj"}
+
+
 def test_upsert_item_persists_session_id():
     db.upsert_item(
         "p1", "done", "did a thing", "2026-08-14T10:00:00+00:00", None, "agent", "a1",

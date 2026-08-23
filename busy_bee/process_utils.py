@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import datetime, timedelta, timezone
 
 
 def _ppid_and_comm(pid: str) -> tuple[str, str] | None:
@@ -76,3 +77,86 @@ def live_claude_ttys() -> set[str]:
         if comm.rsplit("/", 1)[-1] == "claude":
             ttys.add(tty)
     return ttys
+
+
+def _parse_etime(value: str) -> timedelta | None:
+    """Parses `ps -o etime` ("[[dd-]hh:]mm:ss") into a timedelta.
+
+    Elapsed time rather than `ps -o lstart`, whose output is a
+    locale- and timezone-dependent string ("Mon Aug 18 15:03:33 2026")
+    that has to be parsed back into an aware datetime to be compared
+    with anything; subtracting an elapsed time from `now` sidesteps
+    both."""
+    days = 0
+    if "-" in value:
+        day_part, _, value = value.partition("-")
+        try:
+            days = int(day_part)
+        except ValueError:
+            return None
+    parts = value.split(":")
+    if len(parts) == 2:
+        parts = ["0", *parts]
+    if len(parts) != 3:
+        return None
+    try:
+        hours, minutes, seconds = (int(p) for p in parts)
+    except ValueError:
+        return None
+    return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+
+
+def claude_session_start_times() -> dict[str, str]:
+    """When the `claude` process currently attached to each live tty
+    started, as an ISO8601 UTC timestamp.
+
+    Lets callers tell a still-relevant log from a leftover one on a
+    *reused* tty: macOS hands the same tty device (ttys013, say) to a
+    new terminal window once the previous occupant closes, so items
+    logged by that earlier, long-gone session are still on file against
+    this tty. Anything logged before the tty's current `claude` process
+    even existed belongs to that dead session, whatever project it was
+    for -- which is how a brand new session in an untracked directory
+    used to resurrect an unrelated project's old session card (and get
+    its terminal painted that project's color).
+
+    The *earliest* start time wins when a tty has more than one
+    `claude` on it (a nested/sub-session shouldn't shorten the window
+    its parent's items are judged against). Ttys whose elapsed time
+    can't be parsed are simply left out, so callers fall back to their
+    previous, unfiltered behaviour rather than dropping a live session."""
+    result = subprocess.run(["ps", "-eo", "tty=,etime=,comm="], capture_output=True, text=True)
+    now = datetime.now(timezone.utc)
+    starts: dict[str, datetime] = {}
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) != 3:
+            continue
+        tty, etime, comm = parts
+        if tty == "??" or comm.rsplit("/", 1)[-1] != "claude":
+            continue
+        elapsed = _parse_etime(etime)
+        if elapsed is None:
+            continue
+        started = now - elapsed
+        if tty not in starts or started < starts[tty]:
+            starts[tty] = started
+    return {tty: dt.isoformat() for tty, dt in starts.items()}
+
+
+def logged_before_session_start(created_at: str, session_started_at: str | None) -> bool:
+    """Was an item logged before the `claude` process currently on its
+    tty started -- i.e. by an earlier session that has since exited and
+    left its tty number to be reused?
+
+    False whenever the start time is unknown or either timestamp is
+    unparseable: every caller uses this to hide or resolve something, so
+    an unreadable timestamp should mean "leave it alone", never "assume
+    it's stale"."""
+    if session_started_at is None:
+        return False
+    try:
+        return datetime.fromisoformat(created_at) < datetime.fromisoformat(session_started_at)
+    except (TypeError, ValueError):
+        return False
+

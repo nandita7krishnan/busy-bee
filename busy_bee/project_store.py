@@ -76,27 +76,41 @@ def mark_session_start(project_root: Path) -> dict:
     return add_item(project_root, "session_start", "session started", source="hook")
 
 
-def auto_resolve_dead_sessions(project_root: Path, live_ttys: set[str]) -> bool:
-    """Marks any still-open blocker/question resolved once the terminal
-    that logged it has closed -- a closed terminal can't act on it or
-    answer it, so leaving it flagged forever just piles up stale noise
-    on the dashboard (it was otherwise never dropped, by design, so it
+def auto_resolve_dead_sessions(
+    project_root: Path, live_ttys: set[str], session_started_at: dict[str, str] | None = None
+) -> bool:
+    """Marks any still-open blocker/question resolved once the session
+    that logged it has ended -- it can't act on it or answer it, so
+    leaving it flagged forever just piles up stale noise on the
+    dashboard (it was otherwise never dropped, by design, so it
     wouldn't be silently lost while the session was still live). Only
     items with a recorded terminal_tty are eligible -- older items from
     before that was tracked have no tty to judge liveness by, and are
     left for manual `dashctl resolve`. Returns True if anything changed,
-    so the caller can skip an unnecessary rewrite."""
+    so the caller can skip an unnecessary rewrite.
+
+    A session counts as ended either because its terminal closed (its
+    tty is gone from live_ttys) or because the tty outlived it: macOS
+    hands a closed window's tty number to the next one, so a flag can
+    sit on a tty that is live again while the session that raised it is
+    long gone. `session_started_at` (tty -> ISO8601, from
+    process_utils.claude_session_start_times) catches that second case
+    -- anything logged before the `claude` currently on that tty
+    started belongs to a dead session. Ttys missing from it are judged
+    on liveness alone, as before."""
     items = _load(project_root)
+    started_at = session_started_at or {}
     changed = False
     for item in items:
-        if (
-            item["type"] in ("blocker", "question")
-            and item["resolved_at"] is None
-            and item.get("terminal_tty")
-            and item["terminal_tty"] not in live_ttys
+        tty = item.get("terminal_tty")
+        if item["type"] not in ("blocker", "question") or item["resolved_at"] is not None or not tty:
+            continue
+        if tty in live_ttys and not process_utils.logged_before_session_start(
+            item["created_at"], started_at.get(tty)
         ):
-            item["resolved_at"] = _now()
-            changed = True
+            continue
+        item["resolved_at"] = _now()
+        changed = True
     if changed:
         _save(project_root, items)
     return changed

@@ -11,6 +11,13 @@ turns, starting with the first -- left purely to the agent's judgment
 show Claude Code's own auto-generated tab title for a while before any
 real summary showed up.
 
+Also requires a `dashctl question` specifically whenever the turn ends
+on a question awaiting the user's response (e.g. "want me to go ahead?").
+Without this, a turn that already logged a `done`/`summary` earlier
+satisfied the generic "something was logged" check below, so a trailing
+question never got flagged and the dashboard never showed it -- the
+agent's own judgment alone wasn't reliably catching this pattern.
+
 Wire it up in the project's .claude/settings.json:
 
 {
@@ -41,6 +48,67 @@ from busy_bee import process_utils, project_store  # noqa: E402
 
 RECENT_WINDOW_SECONDS = 120
 SUMMARY_INTERVAL = 10  # every Nth turn, starting with the first
+
+# Phrases that signal a turn is waiting on the user even without a
+# trailing "?" (e.g. "Let me know how you'd like to proceed.").
+_WAITING_PHRASES = ("let me know", "want me to", "should i", "shall i", "waiting on your")
+
+
+def _last_assistant_text(transcript_path: str | None) -> str | None:
+    """Best-effort read of the most recent assistant message's text
+    from the session transcript (JSONL, newest entries last). Missing
+    or unreadable transcripts just disable the question check below --
+    everything else in this hook still runs."""
+    if not transcript_path:
+        return None
+    path = Path(transcript_path)
+    if not path.exists():
+        return None
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("type") != "assistant":
+            continue
+        content = (entry.get("message") or {}).get("content") or []
+        texts = [
+            block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        text = "\n".join(t for t in texts if t)
+        if text:
+            return text
+    return None
+
+
+_WAITING_TAIL_CHARS = 60
+
+
+def _awaiting_user_response(text: str | None) -> bool:
+    """Is this message ending on a question aimed at the user, i.e. the
+    turn is stopping to wait for their reply rather than finishing a
+    unit of work? The waiting-phrase check only looks at the tail of
+    the message, not "does this phrase appear anywhere" -- a message
+    that quotes or references an earlier question (e.g. recapping "the
+    user was asked 'want me to go ahead?'" before reporting it's done)
+    would otherwise falsely trip this every time, even though the
+    message itself ends on a plain statement."""
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.endswith("?"):
+        return True
+    tail = stripped[-_WAITING_TAIL_CHARS:].lower()
+    return any(phrase in tail for phrase in _WAITING_PHRASES)
 
 
 def main() -> int:
@@ -81,6 +149,24 @@ def main() -> int:
                 )
             )
             return 0
+
+    if _awaiting_user_response(_last_assistant_text(payload.get("transcript_path"))) and not (
+        project_store.has_logged_this_turn(
+            project_root, since_seconds=RECENT_WINDOW_SECONDS, item_type="question"
+        )
+    ):
+        print(
+            json.dumps(
+                {
+                    "decision": "block",
+                    "reason": (
+                        "This turn ends on a question for the user -- log it "
+                        'specifically: `dashctl question "..."`.'
+                    ),
+                }
+            )
+        )
+        return 0
 
     if project_store.has_logged_this_turn(project_root, since_seconds=RECENT_WINDOW_SECONDS):
         return 0

@@ -42,6 +42,20 @@ from busy_bee import aggregator, config, db, icon, process_utils, terminal_launc
 UI_DIR = __file__.rsplit("/", 1)[0] + "/ui"
 
 
+def _flag_belongs_to(flag: dict, tty: str, session_id: str | None) -> bool:
+    """Is this unresolved blocker/question one the session currently
+    running on `tty` logged? Falls back to matching the tty alone when
+    either side has no session id -- items logged before session ids
+    were tracked have none, and dropping them from their own session's
+    card would be a worse regression than the stale-flag case this
+    guards against."""
+    if flag["tty"] != tty:
+        return False
+    if flag["session_id"] is None or session_id is None:
+        return True
+    return flag["session_id"] == session_id
+
+
 class Api:
     """Exposed to both the popover's and the floating widget's JS as
     `window.pywebview.api`. `popover_window` is set right after
@@ -60,7 +74,12 @@ class Api:
         # the terminal itself closing -- current_project_by_tty() picks
         # the one it most recently logged to, so the session block moves
         # with it instead of lingering on every project it ever visited.
-        current_project_by_tty = db.current_project_by_tty()
+        # Passing each tty's current session start time also keeps a
+        # *reused* tty from carrying its previous occupant's project
+        # over to whatever unrelated session inherited the tty number.
+        current_project_by_tty = db.current_project_by_tty(
+            process_utils.claude_session_start_times()
+        )
         result = []
         for p in projects:
             # A "session" only exists on the dashboard while its
@@ -92,14 +111,30 @@ class Api:
             # live session (no session block to attach to) falls back
             # to the project-level badge so it's never dropped.
             blockers_all = [
-                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
+                {
+                    "id": row["id"],
+                    "text": row["text"],
+                    "tty": row["terminal_tty"],
+                    "session_id": row["session_id"],
+                }
                 for row in db.get_unresolved(p["name"], "blocker")
             ]
             questions_all = [
-                {"id": row["id"], "text": row["text"], "tty": row["terminal_tty"]}
+                {
+                    "id": row["id"],
+                    "text": row["text"],
+                    "tty": row["terminal_tty"],
+                    "session_id": row["session_id"],
+                }
                 for row in db.get_unresolved(p["name"], "question")
             ]
 
+            # Which flags a session card claimed, so the project-level
+            # fallback below is exactly "everything no live session card
+            # is already showing" -- matching on tty alone would drop a
+            # flag left behind by an earlier session on a *reused* tty,
+            # since that tty is live but the flag isn't this session's.
+            attached_flag_ids: set[int] = set()
             sessions = []
             for tty in live_session_ttys:
                 # A tty is reused across unrelated `claude` invocations
@@ -109,6 +144,16 @@ class Api:
                 # alone -- otherwise a brand new session here would
                 # inherit a previous, unrelated session's history.
                 session_id = db.latest_session_id_for_tty(p["name"], tty)
+                # Scoped by session_id for the same reason done/todo are:
+                # an unresolved blocker or question logged by an earlier
+                # session that happened to run on this same tty isn't
+                # this session's to act on, and showing it here reads as
+                # if the current agent is stuck on it.
+                session_blockers = [b for b in blockers_all if _flag_belongs_to(b, tty, session_id)]
+                session_questions = [
+                    q for q in questions_all if _flag_belongs_to(q, tty, session_id)
+                ]
+                attached_flag_ids.update(f["id"] for f in session_blockers + session_questions)
                 sessions.append(
                     {
                         "tty": tty,
@@ -133,8 +178,8 @@ class Api:
                             row["text"]
                             for row in db.get_next_todo(p["name"], terminal_tty=tty, session_id=session_id)
                         ],
-                        "blockers": [b for b in blockers_all if b["tty"] == tty],
-                        "questions": [q for q in questions_all if q["tty"] == tty],
+                        "blockers": session_blockers,
+                        "questions": session_questions,
                     }
                 )
 
@@ -144,8 +189,8 @@ class Api:
             # from two agents into one confusing feed.
             done, todo = [], []
 
-            blockers = [b for b in blockers_all if b["tty"] not in live_session_ttys]
-            questions = [q for q in questions_all if q["tty"] not in live_session_ttys]
+            blockers = [b for b in blockers_all if b["id"] not in attached_flag_ids]
+            questions = [q for q in questions_all if q["id"] not in attached_flag_ids]
             result.append(
                 {
                     "name": p["name"],

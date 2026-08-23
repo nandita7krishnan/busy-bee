@@ -51,7 +51,8 @@ Code. If it had to fall back to `~/.local/bin`, it prints an explicit
 `~/.claude/settings.json`, all at the Claude Code *user* level. This
 is what makes tracking automatic: every Claude Code session on the
 machine picks up the instructions, and any project auto-registers
-itself the first time an agent in it calls `dashctl` -- no
+itself the moment a session opens in it (the `SessionStart` hook), or
+at the latest the first time an agent in it calls `dashctl` -- no
 `dashctl init`, no per-project CLAUDE.md edits, no per-project hook
 config needed.
 
@@ -240,7 +241,7 @@ busy_bee/
   ui/                        popover.html/css/js, widget.html/js (floating icon)
 hooks/
   stop_hook.py           Claude Code Stop hook (the safety net, also nudges periodic summaries)
-  session_start_hook.py  Claude Code SessionStart hook -- marks a new session before it logs anything
+  session_start_hook.py  Claude Code SessionStart hook -- registers the directory and marks the new session before it logs anything
   todo_sync_hook.py      PostToolUse/TodoWrite hook -- calls busy_bee/todo_sync.py
 claude_md_snippet.md   installed into ~/.claude/CLAUDE.md by setup-global
 scripts/
