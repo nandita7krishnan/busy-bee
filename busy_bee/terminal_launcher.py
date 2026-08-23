@@ -33,19 +33,27 @@ tell application "Terminal"
 end tell
 """
 
+# Deliberately no `activate` here (nor in the new-window script below).
+# `activate` is app-level: macOS brings every Terminal window forward as
+# a group, like clicking the Dock icon, burying whatever else was on
+# screen. These scripts only order the target to the front *within*
+# Terminal (`set index ... to 1`); bringing it above other apps is
+# _activate_terminal_front_window_only's job, and it deliberately raises
+# just that one window.
 FOCUS_TAB_APPLESCRIPT = """
 tell application "Terminal"
-    activate
     set targetWindow to (first window whose id is {window_id})
     set selected tab of targetWindow to tab {tab_index} of targetWindow
     set index of targetWindow to 1
+    return name of targetWindow
 end tell
 """
 
+
 NEW_TERMINAL_WINDOW_APPLESCRIPT = """
 tell application "Terminal"
-    activate
     do script "cd {path} && (claude --continue {prompt} || claude {prompt})"
+    return name of window 1
 end tell
 """
 
@@ -105,9 +113,68 @@ def _find_tab_by_tty(tty: str) -> dict | None:
     return None
 
 
+def _raise_window() -> None:
+    """Brings Terminal's current front window forward, leaving its other
+    windows where they sit -- the behaviour of clicking that one window,
+    not of activating the app. Callers must already have ordered the
+    window they want to `index 1` within Terminal.
+
+    An earlier attempt drove this with System Events' AXRaise, which was
+    both unnecessary and actively harmful: `set index ... to 1` already
+    makes the target Terminal's front window, and the osascript
+    subprocess running AXRaise is its own process for TCC purposes, so
+    it does *not* inherit busy-bee's Accessibility grant. It failed
+    every time and fell through to the app-level `activate` below --
+    raising every Terminal window, i.e. exactly the bug this is meant to
+    fix. Verified with CGWindowListCopyWindowInfo: set-index plus this
+    activation leaves precisely one Terminal window above the previously
+    frontmost app."""
+    if not _activate_terminal_front_window_only():
+        _activate_terminal()
+
+
+TERMINAL_BUNDLE_ID = "com.apple.Terminal"
+
+# NSRunningApplication activation options. Passing 0 -- rather than
+# NSApplicationActivateAllWindows (1) -- is the whole point: it makes
+# the app active and brings its *front* window forward, leaving its
+# other windows where they sit in the global z-order. AppleScript's
+# `activate` (and System Events' `set frontmost to true`) always imply
+# all-windows, which is why they can't express "just this one".
+_ACTIVATE_FRONT_WINDOW_ONLY = 0
+
+
+def _activate_terminal_front_window_only() -> bool:
+    """Activates Terminal without dragging its whole window group
+    forward. Returns False if AppKit isn't usable here (e.g. a test
+    process, or a non-GUI context), so the caller can fall back."""
+    try:
+        import AppKit
+
+        apps = AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(
+            TERMINAL_BUNDLE_ID
+        )
+        if not apps:
+            return False
+        return bool(apps[0].activateWithOptions_(_ACTIVATE_FRONT_WINDOW_ONLY))
+    except Exception:
+        return False
+
+
+def _activate_terminal() -> None:
+    """Last-resort app-level activate: brings every Terminal window
+    forward. Only used when the single-window path isn't available."""
+    subprocess.run(
+        ["osascript", "-e", 'tell application "Terminal" to activate'], check=False
+    )
+
+
 def _focus_terminal_tab(window_id: str, tab_index: str) -> None:
     script = FOCUS_TAB_APPLESCRIPT.format(window_id=window_id, tab_index=tab_index)
-    subprocess.run(["osascript", "-e", script], check=True)
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if result.returncode != 0:
+        return
+    _raise_window()
 
 
 def session_title_for_tty(tty: str) -> str | None:
@@ -251,4 +318,10 @@ def resume_project(
         if terminal_app.lower() == "iterm"
         else NEW_TERMINAL_WINDOW_APPLESCRIPT
     ).format(path=quoted_path, prompt=quoted_prompt)
-    subprocess.run(["osascript", "-e", script], check=True)
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, "osascript", result.stdout, result.stderr)
+    # iTerm brings its own new window forward -- only Terminal needs the
+    # explicit single-window raise.
+    if terminal_app.lower() != "iterm":
+        _raise_window()

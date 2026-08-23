@@ -29,6 +29,8 @@
     --text: #f2f2f7;
     --text-muted: #9a9a9f;
     --border: #3a3a3c;
+    /* systemRedColor's dark-mode value, matching the icon badge. */
+    --badge-bg: #ff453a;
   }
 }
 
@@ -120,17 +122,20 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 8px;
-  font-size: 10px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--badge-text);
 }
 
-.badge.blocker { background: var(--coral); }
-.badge.question { background: var(--coral); }
+/* Same red as the badge on the menu bar bee (NSColor.systemRedColor),
+   not --coral -- the count in the card and the count on the icon are
+   the same signal, so they shouldn't read as two different alerts. */
+.badge.blocker { background: var(--badge-bg); }
+.badge.question { background: var(--badge-bg); }
 
 .chevron {
   color: var(--text-muted);
