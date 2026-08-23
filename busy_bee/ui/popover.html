@@ -7,10 +7,20 @@
 </head>
 <body>
   <div id="app">
+    <!-- Above #cards, and deliberately outside it: that container's
+         innerHTML is rebuilt from scratch on every 5s refresh, which
+         would wipe this input (and whatever is being typed into it). -->
+    <div id="add-project" class="add-project">
+      <input id="new-project-name" type="text" placeholder="what else is cooking?" autocomplete="off" />
+      <button id="add-project-btn" type="button">Add</button>
+    </div>
+    <div id="add-project-error" class="form-error" hidden></div>
     <div id="empty-state" class="empty-state" hidden>
       No projects with an active session right now. A project shows up
       here as soon as an agent inside it logs status with
       <code>dashctl</code>, and disappears again once its terminal closes.
+      Or add one above to start jotting down tasks before its folder
+      even exists.
     </div>
     <div id="cards"></div>
   </div>

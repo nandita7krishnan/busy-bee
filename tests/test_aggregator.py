@@ -146,7 +146,9 @@ def test_sync_session_state_attributes_tty_to_most_recent_project_only(monkeypat
 
     calls = {}
     monkeypatch.setattr(
-        aggregator.terminal_launcher, "sync_session_colors", lambda name, ttys: calls.setdefault(name, ttys)
+        aggregator.terminal_launcher,
+        "sync_session_colors",
+        lambda name, ttys, color_index=None: calls.setdefault(name, ttys),
     )
 
     live_ttys = frozenset({"ttys002"})
@@ -168,6 +170,31 @@ def test_sync_all_uses_config(tmp_path, monkeypatch):
     config.add_project("proj", str(project_dir))
 
     synced = aggregator.sync_all()
+    assert synced == 1
+    todos = db.get_next_todo("proj")
+    assert [t["text"] for t in todos] == ["write tests"]
+
+
+def test_sync_all_ignores_placeholder_projects(tmp_path, monkeypatch):
+    # A placeholder never enters config.json's projects list (see
+    # placeholder_store.py's module docstring), so it must never reach
+    # sync_project/Path(path) here -- if it did, a pathless placeholder
+    # would raise something sync_all's narrow FileNotFoundError guard
+    # (aggregator.py:95-99) doesn't catch, aborting the rest of the pass
+    # and starving every real project of that poll.
+    from busy_bee import placeholder_store
+
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_store.add_item(project_dir, "todo", "write tests")
+
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(config, "HOME_DIR", tmp_path)
+    config.add_project("proj", str(project_dir))
+    placeholder_store.create("someday-project")
+
+    synced = aggregator.sync_all()
+
     assert synced == 1
     todos = db.get_next_todo("proj")
     assert [t["text"] for t in todos] == ["write tests"]

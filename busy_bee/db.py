@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL DEFAULT 'idle',
   last_seen_at TIMESTAMP,
   terminal_tty TEXT,
-  last_summary TEXT
+  last_summary TEXT,
+  activated_at TIMESTAMP,
+  color_index INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_project_type ON items(project, type);
@@ -66,6 +68,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE projects ADD COLUMN terminal_tty TEXT")
     if "last_summary" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN last_summary TEXT")
+    if "activated_at" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN activated_at TIMESTAMP")
+    if "color_index" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN color_index INTEGER")
 
     # SQLite can't ALTER a CHECK constraint in place -- rebuild items if
     # the table predates 'summary' or 'session_start' being a valid
@@ -143,6 +149,57 @@ def upsert_project(
 def set_project_status(name: str, status: str) -> None:
     with connect() as conn:
         conn.execute("UPDATE projects SET status = ? WHERE name = ?", (status, name))
+
+
+def mark_project_activated(name: str) -> None:
+    """Stamps the moment a placeholder project's folder was created
+    (Api.activate_placeholder_project). Api.get_projects() uses this,
+    together with `terminal_tty IS NULL`, to keep a just-activated
+    project's card visible even though it has no live session yet --
+    the ordinary rule (app.py's live_session_ttys skip) would otherwise
+    make the card vanish the instant "Create folder" succeeds, which is
+    the single worst moment for that to happen. The carve-out expires
+    on its own the moment a real dashctl item logs a tty for this
+    project (terminal_tty stops being NULL), so a project that had a
+    session and lost it still disappears exactly as before -- this
+    never turns into a general "always show every registered project"
+    rule."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE projects SET activated_at = ? WHERE name = ?",
+            (datetime.now(timezone.utc).isoformat(), name),
+        )
+
+
+def ensure_color_index(name: str) -> int:
+    """This project's palette slot, allocating one on first use.
+
+    Assigned against what's already taken (colors.least_used_index)
+    rather than hashed from the name -- see that function for why
+    hashing was producing duplicate card colors. Placeholder projects
+    are counted as taken too, so a placeholder and a real project can't
+    end up the same color either.
+
+    Persisted once and then reused, so a project's color stays put when
+    other projects come and go. Allocation happens inside a single
+    IMMEDIATE transaction because the aggregator thread and the UI
+    thread both call this -- without it, two concurrent first-time
+    lookups could read the same "taken" set and hand out the same slot."""
+    from busy_bee import colors, placeholder_store
+
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT color_index FROM projects WHERE name = ?", (name,)).fetchone()
+        if row is not None and row["color_index"] is not None:
+            return row["color_index"]
+        taken = [
+            r["color_index"]
+            for r in conn.execute("SELECT color_index FROM projects WHERE color_index IS NOT NULL")
+        ]
+        taken += [p.get("color_index") for p in placeholder_store.load()]
+        index = colors.least_used_index(taken)
+        conn.execute("UPDATE projects SET color_index = ? WHERE name = ?", (index, name))
+        return index
 
 
 def upsert_item(
@@ -345,6 +402,65 @@ def current_project_by_tty(session_started_at: dict[str, str] | None = None) -> 
                 r["created_at"], started_at.get(r["tty"])
             )
         }
+
+
+def get_unassigned_todos(project: str) -> list[sqlite3.Row]:
+    """Unresolved todos with source='human' -- the exact tag
+    Api.activate_placeholder_project's migration write path stamps on a
+    placeholder task it hands off (project_store.py never writes this
+    source; only that one call site does). get_next_todo's
+    session_id/terminal_tty branches (above) both require an exact
+    match, and a migrated item has neither, so it never surfaces
+    through them -- this is the query that actually renders a
+    handed-off manual task on its new, real project card.
+
+    NOT filtered on terminal_tty/session_id being NULL, even though a
+    migrated item always has both null: plenty of perfectly ordinary
+    agent-logged items also have terminal_tty and session_id NULL
+    (anything logged before that tracking was reliable, or from a
+    non-terminal invocation) -- confirmed live, this project's own
+    history has two such 'source': 'agent' done items from before
+    session tracking existed. Filtering on those columns instead of
+    source leaked real agent history into the dashboard-only section."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM items WHERE project = ? AND type = 'todo' AND resolved_at IS NULL "
+            "AND source = 'human' ORDER BY created_at ASC",
+            (project,),
+        ).fetchall()
+
+
+def get_unassigned_done(project: str, limit: int = 5) -> list[sqlite3.Row]:
+    """Done counterpart to get_unassigned_todos -- resolved manual
+    items with source='human', most recent first."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM items WHERE project = ? AND type = 'done' AND source = 'human' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (project, limit),
+        ).fetchall()
+
+
+def last_activity_by_project() -> dict[str, str]:
+    """project name -> the timestamp of the most recent item logged
+    against it from a terminal. Used to order the dashboard by "most
+    recently worked in" instead of alphabetically.
+
+    Scoped to items with a terminal_tty so it means "when was this
+    project's terminal last active", which is what the ordering is
+    meant to convey -- not counting, say, tasks the user typed into the
+    dashboard itself (those carry no tty; placeholder cards are ordered
+    separately, see Api._placeholder_cards).
+
+    Deliberately not projects.last_seen_at: the aggregator rewrites that
+    for every tracked project on every poll, so it's near-identical
+    across all of them and useless as a sort key."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT project, MAX(created_at) AS last_at FROM items "
+            "WHERE terminal_tty IS NOT NULL GROUP BY project"
+        ).fetchall()
+        return {r["project"]: r["last_at"] for r in rows}
 
 
 def get_unresolved(project: str, item_type: str) -> list[sqlite3.Row]:

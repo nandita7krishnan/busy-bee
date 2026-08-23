@@ -129,6 +129,36 @@ def resolve_item(project_root: Path, item_type: ItemType, item_id: str) -> bool:
     return False
 
 
+def stale_flags_awaiting_resolve(
+    project_root: Path, session_id: str, before: str | None
+) -> list[dict]:
+    """This session's own blockers/questions that were logged before
+    `before` (the current turn's start boundary, from bump_turn_count)
+    and are still unresolved.
+
+    Logged before this turn started means the user has replied at least
+    once since -- so the thing that was blocking or being asked has been
+    responded to, and the item should have been resolved. Nothing else
+    catches this: auto_resolve_dead_sessions only steps in once the
+    session *ends* (deliberately, so a live flag is never silently
+    dropped), which leaves a live session's answered questions sitting
+    on the dashboard indefinitely. Used by the Stop hook to nudge for a
+    `dashctl resolve`, the same way it already nudges to log one.
+
+    Scoped to this session's own items: another terminal's open question
+    is not this session's to resolve."""
+    if before is None:
+        return []
+    return [
+        i
+        for i in _load(project_root)
+        if i["type"] in ("blocker", "question")
+        and i["resolved_at"] is None
+        and i.get("session_id") == session_id
+        and i["created_at"] < before
+    ]
+
+
 def all_items(project_root: Path) -> list[dict]:
     return _load(project_root)
 

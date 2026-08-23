@@ -299,3 +299,62 @@ def test_mark_session_start_logs_a_session_start_item(tmp_path, monkeypatch):
     assert items[0]["type"] == "session_start"
 
     assert project_store.summary_logged_since(tmp_path, "session-1", None) is False
+
+
+def test_stale_flags_awaiting_resolve_finds_this_sessions_unanswered_flag(tmp_path):
+    item = project_store.add_item(tmp_path, "question", "which env?")
+    items = project_store.all_items(tmp_path)
+    items[-1]["session_id"] = "session-1"
+    items[-1]["created_at"] = "2026-08-14T10:00:00+00:00"
+    project_store._save(tmp_path, items)
+
+    # This turn started after the question was logged -- so the user has
+    # replied at least once since, and it should have been resolved.
+    stale = project_store.stale_flags_awaiting_resolve(
+        tmp_path, "session-1", "2026-08-14T12:00:00+00:00"
+    )
+    assert [i["id"] for i in stale] == [item["id"]]
+
+
+def test_stale_flags_awaiting_resolve_ignores_one_logged_this_turn(tmp_path):
+    project_store.add_item(tmp_path, "question", "just asked")
+    items = project_store.all_items(tmp_path)
+    items[-1]["session_id"] = "session-1"
+    items[-1]["created_at"] = "2026-08-14T13:00:00+00:00"
+    project_store._save(tmp_path, items)
+
+    assert (
+        project_store.stale_flags_awaiting_resolve(
+            tmp_path, "session-1", "2026-08-14T12:00:00+00:00"
+        )
+        == []
+    )
+
+
+def test_stale_flags_awaiting_resolve_ignores_resolved_and_other_sessions(tmp_path):
+    resolved = project_store.add_item(tmp_path, "question", "already answered")
+    project_store.resolve_item(tmp_path, "question", resolved["id"])
+    project_store.add_item(tmp_path, "blocker", "another terminal's blocker")
+    items = project_store.all_items(tmp_path)
+    items[0]["session_id"] = "session-1"
+    items[0]["created_at"] = "2026-08-14T10:00:00+00:00"
+    items[1]["session_id"] = "session-other"
+    items[1]["created_at"] = "2026-08-14T10:00:00+00:00"
+    project_store._save(tmp_path, items)
+
+    assert (
+        project_store.stale_flags_awaiting_resolve(
+            tmp_path, "session-1", "2026-08-14T12:00:00+00:00"
+        )
+        == []
+    )
+
+
+def test_stale_flags_awaiting_resolve_is_empty_on_a_sessions_first_turn(tmp_path):
+    project_store.add_item(tmp_path, "question", "asked")
+    items = project_store.all_items(tmp_path)
+    items[-1]["session_id"] = "session-1"
+    project_store._save(tmp_path, items)
+
+    # No previous turn boundary yet -- nothing can be "from an earlier turn".
+    assert project_store.stale_flags_awaiting_resolve(tmp_path, "session-1", None) == []

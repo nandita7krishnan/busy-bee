@@ -32,12 +32,24 @@ from __future__ import annotations
 import base64
 import threading
 import time
+from pathlib import Path
 
 import rumps
 import webview
 from PyObjCTools import AppHelper
 
-from busy_bee import aggregator, config, db, icon, process_utils, terminal_launcher
+from busy_bee import (
+    aggregator,
+    config,
+    db,
+    dialogs,
+    icon,
+    placeholder_store,
+    process_utils,
+    project_store,
+    terminal_launcher,
+    todo_sync,
+)
 
 UI_DIR = __file__.rsplit("/", 1)[0] + "/ui"
 
@@ -65,6 +77,13 @@ class Api:
 
     def __init__(self) -> None:
         self.popover_window: webview.Window | None = None
+        # Serializes the "Create folder" flow: it opens two sequential
+        # native dialogs (a folder picker, maybe a confirm), and
+        # pywebview's folder-dialog semaphore is per-window -- two
+        # concurrent calls on the same window would corrupt each other.
+        # The JS side also disables the triggering button for the same
+        # reason (belt and suspenders).
+        self._dialog_lock = threading.Lock()
 
     def get_projects(self) -> list[dict]:
         projects = db.get_projects()
@@ -80,6 +99,7 @@ class Api:
         current_project_by_tty = db.current_project_by_tty(
             process_utils.claude_session_start_times()
         )
+        last_activity = db.last_activity_by_project()
         result = []
         for p in projects:
             # A "session" only exists on the dashboard while its
@@ -101,7 +121,20 @@ class Api:
             # pointing at a dead terminal) sitting on the dashboard
             # indefinitely. Its history isn't lost -- it's still in the
             # db and reappears the moment a new session logs to it again.
-            if not live_session_ttys:
+            #
+            # One carve-out: a project just activated from a placeholder
+            # card (db.mark_project_activated, called at the end of
+            # activate_placeholder_project) and that has never had a
+            # dashctl item log a tty for it yet (terminal_tty IS NULL)
+            # stays visible anyway -- otherwise the card the user just
+            # created a folder for would vanish immediately, which is
+            # the worst possible moment for that to happen. The instant
+            # a real session logs something (terminal_tty becomes
+            # non-NULL, via aggregator.sync_project), this carve-out
+            # stops applying on its own and the ordinary rule above
+            # takes back over.
+            just_activated = p["activated_at"] is not None and p["terminal_tty"] is None
+            if not live_session_ttys and not just_activated:
                 continue
 
             # Fetched once per project, then split by tty below -- each
@@ -183,11 +216,30 @@ class Api:
                     }
                 )
 
-            # Always non-empty here (a project with none was skipped
-            # above) -- broken out per-session instead of a flat
-            # cross-session list, which would interleave unrelated tasks
-            # from two agents into one confusing feed.
-            done, todo = [], []
+            # Session-scoped done/todo stay broken out per-session (above)
+            # rather than pooled here, to avoid interleaving unrelated
+            # work from two agents into one confusing feed. What lands
+            # here at the project level is specifically NOT session
+            # work: items tagged source='human' -- today that means only
+            # manually-added tasks migrated in from a placeholder project
+            # on activation (see activate_placeholder_project). Tagged by
+            # source, not by a null session_id/terminal_tty -- plenty of
+            # ordinary agent items predate reliable tty/session tracking
+            # and have both null too; filtering on those instead of
+            # source leaked real agent history in here (see db.py's
+            # get_unassigned_todos/done docstrings).
+            # Plus, for a project that still has a *retained* placeholder
+            # record (the user declined that handoff and kept the tasks
+            # dashboard-only), those tasks too -- so a real project's
+            # card never silently drops manual tasks depending on which
+            # way that one-time prompt was answered.
+            done = [{"id": row["id"], "text": row["text"]} for row in db.get_unassigned_done(p["name"])]
+            todo = [{"id": row["id"], "text": row["text"]} for row in db.get_unassigned_todos(p["name"])]
+            retained = placeholder_store.get(p["name"])
+            if retained and retained["activated_path"] is not None:
+                for task in retained["tasks"]:
+                    entry = {"id": task["id"], "text": task["text"]}
+                    (done if task["resolved_at"] else todo).append(entry)
 
             blockers = [b for b in blockers_all if b["id"] not in attached_flag_ids]
             questions = [q for q in questions_all if q["id"] not in attached_flag_ids]
@@ -197,6 +249,17 @@ class Api:
                     "path": p["path"],
                     "status": p["status"],
                     "summary": p["last_summary"],
+                    "placeholder": False,
+                    # Allocated server-side (db.ensure_color_index) rather
+                    # than hashed from the name in JS -- hashing gave two
+                    # projects the same color. The UI just renders what
+                    # it's told now.
+                    "color": db.ensure_color_index(p["name"]),
+                    # Most recent terminal activity, falling back to when
+                    # the folder was created for a project activated from
+                    # a placeholder that hasn't had a session yet. Sorted
+                    # on below, then dropped -- the UI never sees it.
+                    "_last_active": last_activity.get(p["name"]) or p["activated_at"] or "",
                     "done": done,
                     "todo": todo,
                     "sessions": sessions,
@@ -204,7 +267,212 @@ class Api:
                     "questions": questions,
                 }
             )
+
+        result.extend(self._placeholder_cards())
+        # Most recently worked-in first. ISO8601 UTC strings throughout,
+        # so a plain string comparison is already chronological.
+        result.sort(key=lambda card: card["_last_active"], reverse=True)
+        for card in result:
+            del card["_last_active"]
         return result
+
+    def _placeholder_cards(self) -> list[dict]:
+        cards = []
+        for record in placeholder_store.list_pending():
+            resolved = [t for t in record["tasks"] if t["resolved_at"]]
+            unresolved = [t for t in record["tasks"] if not t["resolved_at"]]
+            resolved.sort(key=lambda t: t["created_at"], reverse=True)
+            cards.append(
+                {
+                    "name": record["name"],
+                    "path": None,
+                    "status": "idle",
+                    "summary": None,
+                    "placeholder": True,
+                    # Allocates + persists on first use, which also
+                    # backfills records that predate color_index --
+                    # defaulting those to 0 collided with whichever real
+                    # project already had slot 0.
+                    "color": placeholder_store.ensure_color_index(record["name"]),
+                    # A placeholder has no terminal, so "last touched" is
+                    # the last time the user typed into it here -- which
+                    # keeps a just-created card at the top, where they're
+                    # looking, rather than sinking it below every project
+                    # with a live session.
+                    "_last_active": max(
+                        [record["created_at"]] + [t["created_at"] for t in record["tasks"]]
+                    ),
+                    "done": [{"id": t["id"], "text": t["text"]} for t in resolved[:5]],
+                    "todo": [{"id": t["id"], "text": t["text"]} for t in unresolved],
+                    "sessions": [],
+                    "blockers": [],
+                    "questions": [],
+                }
+            )
+        return cards
+
+    def add_placeholder_project(self, name: str) -> dict:
+        try:
+            placeholder_store.create(name)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "name": name}
+
+    def remove_placeholder_project(self, project_name: str) -> dict:
+        # dashctl untrack only reaches config.json + the sqlite store
+        # (cli.cmd_untrack), so without this a mistyped placeholder card
+        # would otherwise be permanently stuck with no way to remove it.
+        return {"ok": placeholder_store.delete(project_name)}
+
+    def add_placeholder_task(self, project_name: str, text: str) -> dict:
+        try:
+            task = placeholder_store.add_task(project_name, text)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "task": task}
+
+    def set_placeholder_task_done(self, project_name: str, task_id: str, done: bool) -> dict:
+        return {"ok": placeholder_store.set_task_resolved(project_name, task_id, done)}
+
+    def activate_placeholder_project(self, project_name: str) -> dict:
+        """The "Create folder" flow -- turns a placeholder card into a real,
+        folder-backed project. Runs the whole sequence under
+        _dialog_lock -- it drives up to two sequential native dialogs on
+        the same window, and pywebview's folder-dialog semaphore is
+        per-window, so a second concurrent call here would corrupt the
+        first's wait."""
+        with self._dialog_lock:
+            record = placeholder_store.get(project_name)
+            if record is None or record["activated_path"] is not None:
+                return {"ok": False, "error": "no such placeholder project"}
+
+            if self.popover_window is None:
+                return {"ok": False, "error": "no window to anchor the folder picker to"}
+            parent = dialogs.choose_folder(self.popover_window)
+            if not parent:
+                return {"ok": False, "cancelled": True}
+
+            target = Path(parent) / project_name
+
+            # Re-checked here, not just at placeholder_store.create() time
+            # -- config.auto_register can claim this exact name from any
+            # terminal in the interim between the card being created and
+            # "Create folder" being clicked.
+            tracked_names = {p["name"] for p in config.list_projects()}
+            tracked_paths = {p["path"] for p in config.list_projects()}
+            if project_name in tracked_names or str(target) in tracked_paths:
+                return {"ok": False, "error": f"{project_name!r} is already a tracked project"}
+
+            if target.exists():
+                if target.is_dir() and not any(target.iterdir()):
+                    pass  # adopt the empty directory
+                else:
+                    return {"ok": False, "error": f"{target} already exists and isn't empty"}
+            else:
+                try:
+                    target.mkdir(parents=True)
+                except OSError as exc:
+                    return {"ok": False, "error": str(exc)}
+
+            unresolved = [t for t in record["tasks"] if not t["resolved_at"]]
+            handed_off = False
+            if unresolved:
+                handed_off = dialogs.confirm(
+                    f'Hand off "{project_name}" tasks to Claude?',
+                    f"{len(unresolved)} task(s) will be added to {target} as todo items "
+                    "so a Claude session started there sees them immediately. "
+                    "Declining keeps them here on the dashboard instead.",
+                    "Hand off to Claude",
+                    "Keep in dashboard",
+                )
+
+            status_path = config.project_status_path(target)
+            status_path.parent.mkdir(parents=True, exist_ok=True)
+            if not status_path.exists():
+                status_path.write_text("[]")
+
+            migrated = 0
+            if handed_off:
+                migrated = self._migrate_tasks(target, record["tasks"])
+
+            config.add_project(project_name, str(target))
+            db.upsert_project(project_name, str(target))
+            db.mark_project_activated(project_name)
+
+            if handed_off or not record["tasks"]:
+                # Handed off -> the tasks now live in status.json, this
+                # record's job is done. No tasks ever added -> nothing
+                # for a retained record to usefully carry, so don't
+                # leave an empty stub behind in placeholders.json.
+                placeholder_store.delete(project_name)
+            else:
+                placeholder_store.mark_activated(project_name, str(target))
+
+            # Handing off means "Claude takes it from here", so open the
+            # terminal and give it an actual opening prompt rather than
+            # leaving the user to start the session themselves. The
+            # SessionStart hook's additionalContext alone isn't enough --
+            # it does inject the task list, but Claude Code takes no turn
+            # until a message arrives, so the agent would sit silently
+            # knowing about the tasks and never bring them up.
+            if handed_off:
+                cfg = config.load_config()
+                terminal_launcher.resume_project(
+                    str(target),
+                    cfg.get("terminal_app", "Terminal"),
+                    prompt=self._handoff_prompt(unresolved),
+                )
+
+            return {
+                "ok": True,
+                "path": str(target),
+                "migrated": migrated,
+                "handed_off": handed_off,
+            }
+
+    @staticmethod
+    def _handoff_prompt(tasks: list[dict]) -> str:
+        lines = "\n".join(f"- [{t['id']}] {t['text']}" for t in tasks)
+        return (
+            "I queued these tasks on my busy-bee dashboard before this "
+            f"project existed:\n{lines}\n\n"
+            "Give me a one-line plan for each, then ask which to start "
+            "with -- don't start changing things yet. As each one gets "
+            "done, run `dashctl resolve todo <id>` with the id in "
+            "brackets so it clears off my dashboard."
+        )
+
+    @staticmethod
+    def _migrate_tasks(target: Path, tasks: list[dict]) -> int:
+        """Writes a placeholder's tasks straight into the new project's
+        status.json, bypassing project_store.add_item -- that
+        unconditionally stamps process_utils.find_claude_ancestor_tty()/
+        current_session_id() (project_store.py:59-60), which would
+        misattribute these manual items to whatever session happens to
+        be running busy-bee itself. terminal_tty/session_id are forced
+        None instead, and source is "human" -- a zero-migration
+        distinction (items.source has no CHECK constraint, db.py:27) that
+        nothing else branches on today. Original created_at is kept
+        (not "now") so a migrated item can't accidentally satisfy the
+        Stop hook's has_logged_this_turn recency window for an unrelated,
+        concurrent agent turn."""
+        items = project_store.all_items(target)
+        for task in tasks:
+            items.append(
+                {
+                    "id": task["id"],
+                    "type": "done" if task["resolved_at"] else "todo",
+                    "text": task["text"],
+                    "created_at": task["created_at"],
+                    "resolved_at": task["resolved_at"],
+                    "source": "human",
+                    "terminal_tty": None,
+                    "session_id": None,
+                }
+            )
+        project_store._save(target, items)
+        todo_sync.seed_state(target, [t["text"] for t in tasks])
+        return len(tasks)
 
     def open_terminal(self, project_name: str, tty: str | None = None) -> None:
         project = db.get_project(project_name)

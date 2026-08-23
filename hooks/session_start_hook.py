@@ -49,6 +49,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from busy_bee import config, project_store  # noqa: E402
 
 
+def _pending_handoff_context(project_root: Path) -> str | None:
+    """Unresolved todos tagged source='human' -- tasks a user queued on
+    the busy-bee dashboard before this project's folder existed, then
+    handed off to Claude when it was created (see
+    Api.activate_placeholder_project's migration write path). Session
+    start is the one moment a fresh session can be told about these
+    without the user having to type anything -- surfaced through
+    SessionStart's `additionalContext` (see main()), not just printed
+    for a human to relay manually.
+
+    Deliberately scoped to source='human' only, not every open dashctl
+    todo -- otherwise an old project with a pile of stale todos would
+    dump all of them into every new session's context, which is a much
+    noisier and more surprising change than "the tasks I explicitly
+    handed off are mentioned once."""
+    items = project_store.all_items(project_root)
+    pending = [
+        i
+        for i in items
+        if i["type"] == "todo" and i["resolved_at"] is None and i.get("source") == "human"
+    ]
+    if not pending:
+        return None
+    lines = "\n".join(f"- [{i['id']}] {i['text']}" for i in pending)
+    return (
+        "The user queued some tasks on the busy-bee dashboard for this "
+        "project before its folder existed, then handed them off to you "
+        f"when it was created:\n{lines}\n"
+        "Mention them and ask how they'd like to proceed, rather than "
+        "diving in unprompted. Once one's actually done, resolve it with "
+        "`dashctl resolve todo <id>` (the id is in brackets above) so it "
+        "stops showing up here."
+    )
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -67,6 +102,19 @@ def main() -> int:
         return 0
 
     project_store.mark_session_start(project_root)
+
+    context = _pending_handoff_context(project_root)
+    if context:
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": context,
+                    }
+                }
+            )
+        )
     return 0
 
 

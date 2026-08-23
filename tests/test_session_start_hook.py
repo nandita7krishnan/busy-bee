@@ -70,6 +70,37 @@ def test_tracked_project_logs_a_session_start_marker(monkeypatch, tmp_path):
     assert items[-1]["session_id"] == "session-new"
 
 
+def test_prints_additional_context_for_pending_handed_off_tasks(monkeypatch, tmp_path, capsys):
+    config.add_project(tmp_path.name, str(tmp_path))
+    project_store.add_item(tmp_path, "todo", "sketch the schema", source="human")
+
+    assert _run(monkeypatch, tmp_path) == 0
+
+    out = json.loads(capsys.readouterr().out)
+    context = out["hookSpecificOutput"]["additionalContext"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "sketch the schema" in context
+
+
+def test_prints_nothing_when_there_are_no_pending_handed_off_tasks(monkeypatch, tmp_path, capsys):
+    config.add_project(tmp_path.name, str(tmp_path))
+    project_store.add_item(tmp_path, "todo", "an ordinary agent todo")  # source="agent"
+
+    assert _run(monkeypatch, tmp_path) == 0
+
+    assert capsys.readouterr().out == ""
+
+
+def test_ignores_already_resolved_handed_off_tasks(monkeypatch, tmp_path, capsys):
+    config.add_project(tmp_path.name, str(tmp_path))
+    item = project_store.add_item(tmp_path, "todo", "sketch the schema", source="human")
+    project_store.resolve_item(tmp_path, "todo", item["id"])
+
+    assert _run(monkeypatch, tmp_path) == 0
+
+    assert capsys.readouterr().out == ""
+
+
 def test_new_session_in_reused_tty_immediately_takes_over_the_tty(monkeypatch, tmp_path):
     # The exact bug this hook exists to close: a new session in a
     # reused tty must claim tty ownership before it has logged anything

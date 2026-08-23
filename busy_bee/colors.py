@@ -1,8 +1,16 @@
-"""Per-project identity colors -- palette and hash kept identical to
-the popover UI's own copy (busy_bee/ui/popover.js:projectColorClass,
-busy_bee/ui/popover.css --proj-N) so a project's dashboard card color
-and its Terminal window color always match. JS and Python can't share
-source, so if you touch one, touch both.
+"""Per-project identity colors.
+
+Which palette slot a project gets is decided here (least_used_index)
+and persisted once per project (db.ensure_color_index,
+placeholder_store.create), so the card and its Terminal window always
+agree and two projects don't collide. The UI is handed the resolved
+index by Api.get_projects rather than deriving it -- the JS used to
+re-implement a name hash, which is exactly how two projects ended up
+the same color.
+
+PROJECT_COLORS below must stay in step with --proj-N in
+busy_bee/ui/popover.css (same order); that pairing is still duplicated
+across languages because JS and Python can't share source.
 """
 
 from __future__ import annotations
@@ -78,14 +86,50 @@ def _lightness_for_target_luminance(hue: float, saturation: float, target: float
     return (lo + hi) / 2
 
 
+PROJECT_COLOR_COUNT = len(PROJECT_COLORS)
+
+
+def color_for_index(index: int) -> str:
+    return PROJECT_COLORS[index % PROJECT_COLOR_COUNT]
+
+
+def least_used_index(taken: list[int]) -> int:
+    """The palette slot fewest existing projects are already using,
+    ties broken by lowest index.
+
+    Replaces hashing the project name into a slot, which was the actual
+    cause of two projects sharing a color: a hash sees one name at a
+    time and knows nothing about what's already on the dashboard, so
+    collisions were down to luck -- and with 8 slots the birthday
+    paradox makes a clash near-certain well before 8 projects exist
+    (confirmed live: two separate collisions at only 7). Allocating
+    against what's currently taken is collision-free until the palette
+    genuinely runs out, and only then degrades to sharing the least
+    crowded color.
+
+    Callers persist the result (db.ensure_color_index,
+    placeholder_store.create) rather than recomputing it, so a
+    project's color never shifts when some *other* project appears or
+    disappears."""
+    counts = {i: 0 for i in range(PROJECT_COLOR_COUNT)}
+    for index in taken:
+        if index is not None and 0 <= index < PROJECT_COLOR_COUNT:
+            counts[index] += 1
+    return min(counts, key=lambda i: (counts[i], i))
+
+
 def project_color(name: str) -> str:
+    """Legacy name-hash assignment. Still here as the fallback for
+    anything with no persisted color_index yet (and for the pure-hue
+    tests), but new assignments should go through least_used_index --
+    see its docstring for why hashing collides."""
     h = 0
     for ch in name:
         h = (h * 31 + ord(ch)) & 0xFFFFFFFF
     return PROJECT_COLORS[h % len(PROJECT_COLORS)]
 
 
-def terminal_background_color(name: str, dark: bool = False) -> str:
+def terminal_background_color(name: str, dark: bool = False, index: int | None = None) -> str:
     """A tint of the project's color, for use as a full Terminal tab
     background. The vivid PROJECT_COLORS work fine as a thin accent
     (the popover card's left border), but are far too saturated/bright
@@ -102,7 +146,9 @@ def terminal_background_color(name: str, dark: bool = False) -> str:
     _TERMINAL_BG_SATURATION_CAP_LIGHT/_DARK for why a flat HSL
     lightness (or one shared saturation cap) can't hit either target
     consistently on its own."""
-    base_r, base_g, base_b = _hex_to_rgb01(project_color(name))
+    base_r, base_g, base_b = _hex_to_rgb01(
+        color_for_index(index) if index is not None else project_color(name)
+    )
     hue, _lightness, saturation = colorsys.rgb_to_hls(base_r, base_g, base_b)
     saturation = min(saturation, _TERMINAL_BG_SATURATION_CAP_DARK if dark else _TERMINAL_BG_SATURATION_CAP_LIGHT)
     target = _TERMINAL_BG_TARGET_LUMINANCE_DARK if dark else _TERMINAL_BG_TARGET_LUMINANCE_LIGHT

@@ -42,7 +42,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from busy_bee import config, db, global_setup, project_store
+from busy_bee import config, db, global_setup, placeholder_store, project_store
 
 
 def _project_root() -> Path:
@@ -105,6 +105,11 @@ def cmd_init(name: str | None) -> int:
 def cmd_untrack(name: str) -> int:
     removed_from_config = config.remove_project(name)
     db.delete_project(name)
+    # A retained placeholder record (one whose folder was created but
+    # whose manual tasks were kept dashboard-only, see
+    # Api.activate_placeholder_project) is otherwise the one piece of
+    # this project's state untrack wouldn't reach.
+    placeholder_store.delete(name)
     if not removed_from_config:
         print(f"{name!r} wasn't in config.json (removing any leftover db rows anyway)")
     print(f"untracked {name!r} -- it and its logged items no longer appear on the dashboard")
