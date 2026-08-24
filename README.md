@@ -4,20 +4,60 @@ A macOS menu bar app that gives a single glanceable view across all
 active Claude Code side projects: what got done recently, what's
 next, what's blocked, and what the agent is waiting on you to answer.
 Clicking a project opens a terminal and resumes that project's Claude
-Code session directly.
+Code session directly. You can also jot down a project that doesn't
+exist yet, queue tasks against it, and hand those tasks to Claude the
+moment you create its folder.
 
 See [`docs/prd.md`](./docs/prd.md) for the full spec this was built from.
 
-## Installation
+## Requirements
 
-Follow these steps in order. Each one says what to expect and what to
-do if it doesn't match -- several of these were debugged live, so the
-caveats are real, not hypothetical.
+- **macOS.** Non-negotiable: menu bar status item, AppKit dialogs, and
+  `osascript`-driven Terminal control. The installer refuses to run
+  anywhere else.
+- **Python 3.10+**, and it must be the `python3` the installer finds
+  first. Machines with Anaconda or Xcode's python3 ahead on `PATH`
+  often have 3.8/3.9 there -- check with `python3 --version` and pass
+  `PYTHON=` if it's too old (see step 1).
+- **[Claude Code](https://claude.com/claude-code)**, since everything
+  on the dashboard is logged by agents running in it.
+- **Terminal.app** (default) or **iTerm** for click-to-resume.
+
+No Homebrew packages, no Xcode, no code signing -- `pip` pulls
+`rumps` and `pywebview` (and PyObjC underneath) into a local venv.
+
+## Quick start
+
+Fine to run start-to-finish by an agent; every step is
+non-interactive and idempotent.
+
+```bash
+git clone https://github.com/nandita7krishnan/busy-bee.git ~/busy-bee   # keep the clone somewhere permanent
+cd ~/busy-bee
+./scripts/install.sh                 # venv, PATH symlinks, Claude Code hooks, LaunchAgent
+```
+
+Then verify:
+
+```bash
+dashctl --help                       # prints usage -> dashctl is on PATH
+pgrep -f 'busy-bee' >/dev/null && echo running   # the menu bar app is up
+```
+
+You should see a 🐝 in the menu bar within a few seconds. From then
+on, every Claude Code session on the machine logs to it automatically
+-- no per-project setup.
+
+## Installation, step by step
+
+The same install as above, one step at a time, with what to expect and
+what to do when it doesn't match. Several of these caveats were
+debugged live; they're real, not hypothetical.
 
 ### 1. Clone and run the installer
 
-```
-git clone <this repo>
+```bash
+git clone https://github.com/nandita7krishnan/busy-bee.git
 cd busy-bee
 ./scripts/install.sh
 ```
@@ -27,9 +67,22 @@ This single command creates a `.venv`, installs the package plus
 wires Claude Code up globally (step 3), and installs + starts a
 `launchd` agent that runs the app (step 4).
 
+**Leave the clone where you put it.** The Claude Code hooks and the
+LaunchAgent both reference absolute paths into this directory
+(`~/.claude/settings.json` points at `hooks/*.py`; the plist points at
+`.venv/bin/busy-bee`). Moving or renaming the folder later breaks both
+until you re-run `./scripts/install.sh` from the new location.
+
+If `python3` is older than 3.10, the installer stops before doing
+anything and tells you so. Point it at a newer interpreter:
+
+```bash
+PYTHON=/opt/homebrew/bin/python3.12 ./scripts/install.sh
+```
+
 ### 2. Confirm `dashctl` is actually on PATH
 
-```
+```bash
 dashctl --help
 ```
 
@@ -39,13 +92,15 @@ that's guaranteed to already be on `PATH` on a machine running Claude
 Code. If it had to fall back to `~/.local/bin`, it prints an explicit
 `WARNING` and you'll need to add that to your shell's `PATH` yourself
 (e.g. `export PATH="$HOME/.local/bin:$PATH"` in `~/.zshrc`), or
-`dashctl` will silently fail to be found from new terminals.
+`dashctl` will silently fail to be found from new terminals. You can
+also choose the directory up front with `BIN_DIR=... ./scripts/install.sh`.
 
 ### 3. Verify the global Claude Code wiring
 
 `install.sh` runs `dashctl setup-global`, which installs
 [`claude_md_snippet.md`](./claude_md_snippet.md) into
-`~/.claude/CLAUDE.md` and the [`Stop`](./hooks/stop_hook.py),
+`~/.claude/CLAUDE.md` (between `<!-- busy-bee:start -->` /
+`<!-- busy-bee:end -->` markers) and the [`Stop`](./hooks/stop_hook.py),
 [`SessionStart`](./hooks/session_start_hook.py), and
 `PostToolUse`/`TodoWrite` (`hooks/todo_sync_hook.py`) hooks into
 `~/.claude/settings.json`, all at the Claude Code *user* level. This
@@ -55,6 +110,18 @@ itself the moment a session opens in it (the `SessionStart` hook), or
 at the latest the first time an agent in it calls `dashctl` -- no
 `dashctl init`, no per-project CLAUDE.md edits, no per-project hook
 config needed.
+
+Check it landed:
+
+```bash
+grep -c busy-bee ~/.claude/CLAUDE.md          # >= 1
+grep -c busy-bee/hooks ~/.claude/settings.json # 3 (Stop, SessionStart, TodoWrite)
+```
+
+The hooks are registered to run under plain `python3`, not the venv's
+-- they only import this repo's stdlib-only modules, so they keep
+working even if the venv is rebuilt, but a `python3` does have to
+exist on `PATH` in whatever environment Claude Code runs hooks from.
 
 **Note:** this only affects sessions that read `~/.claude/CLAUDE.md`
 *after* `setup-global` ran. A Claude Code session already running when
@@ -84,7 +151,7 @@ quit until you bring it back.
 
 Look for the small 🐝 icon in your menu bar (top-right strip) --
 easy to miss among other menu bar icons, but it should be there within
-a few seconds of running the installer. It also now shows up in the
+a few seconds of running the installer. It also shows up in the
 Dock with the same bee icon (busy_bee/icon.py renders it), and either
 one badges with a red circle + number whenever there's an unresolved
 blocker/question anywhere -- the Dock badge is macOS's native
@@ -94,12 +161,10 @@ also a small floating widget -- same bee icon, always on top of other
 windows, draggable anywhere on screen (click-and-drag moves it, a
 plain click opens the dashboard, same as the tray menu). Click either
 the tray icon → "Show Dashboard", or the widget directly, to open the
-popover. Click a project name inside a card to open a terminal and
-resume that project's Claude Code session (or focus the
-existing one, if it's already open -- see Architecture). Clicking the
-popover window's red close button hides it rather than actually
-closing/destroying it, so "Show Dashboard" keeps working afterward --
-consistent with the rest of the app staying alive in the background.
+popover. Clicking the popover window's red close button hides it
+rather than actually closing/destroying it, so "Show Dashboard" keeps
+working afterward -- consistent with the rest of the app staying alive
+in the background.
 
 **If you quit it and want it back, launch "Open Busy Bee" from
 Spotlight, Launchpad, or Finder (`/Applications`)** -- `install.sh`
@@ -120,30 +185,16 @@ running, so pinning the reopener too just shows two icons for the same
 thing. If you already dragged it there, drag it back off, or right-
 click → Options → Remove from Dock.
 
-If the icon doesn't appear after either path, check what's actually
-running:
-
-```
-ps aux | grep busy-bee
-tail -20 /tmp/busybee-agent.log
-```
-
 `bash scripts/install_launch_agent.sh` reinstalls and restarts the
 agent directly (equivalent to what "Open Busy Bee" does, but from a
-terminal).
-
-**If an app's icon looks wrong/generic/muted right after (re)building
-it, that's very likely a stale icon cache, not a bad icon file** --
-confirmed live: `iconutil -c iconset` on the actual built `.icns`
-showed the correct art even when the Dock was rendering something
-washed-out. `killall Dock` (safe, it relaunches instantly, no data
-loss) forces a re-render and usually fixes it immediately.
+terminal). See [Troubleshooting](#troubleshooting) if the icon never
+shows up.
 
 ### 5. Log some status and watch it show up
 
 From inside any project directory:
 
-```
+```bash
 dashctl done "<what got finished>"
 dashctl todo "<what's next>"
 dashctl blocker "<what's blocking progress>"
@@ -171,6 +222,10 @@ The aggregator polls every 5s by default (configurable in
 `~/.claude-dashboard/config.json`), so give it a few seconds, then
 reopen the popover -- that project's card should now be there.
 
+## Using the dashboard
+
+### Cards for real projects
+
 Every card is scoped to sessions with a currently-live `claude`
 process, keyed by terminal tty + Claude Code's own per-invocation
 session id (a tty gets reused across unrelated sessions in the same
@@ -181,13 +236,136 @@ back if that session ever logs again), it just stops rendering. Any
 blocker/question it left unresolved is auto-resolved at that point
 too, rather than lingering on the project's badge forever.
 
-### Reinstalling / updating after pulling new code
+Click a project name to open a terminal and resume that project's
+Claude Code session (or focus the existing one, if it's already open
+-- see Architecture). With several live sessions, each session block
+has its own clickable header instead. Blocker and question lines are
+clickable too, and take you to the session that raised them.
+
+These cards are a read-only mirror of what agents actually logged:
+nothing on them can be edited or ticked off by hand, because doing so
+would let the dashboard drift from the terminal it's reflecting.
+Resolution happens in the session, via `dashctl resolve`.
+
+### Cards for projects that don't exist yet
+
+The box at the top of the popover ("what else is cooking?") adds a
+**placeholder card** -- a project you've thought of but haven't
+created a folder for. These are the one editable thing on the
+dashboard, since you typed them rather than an agent logging them:
+
+- **`+ Task`** in the card header expands it and drops the cursor in
+  the "Add a task" box. Placeholder cards render collapsed by default.
+- **The checkbox** on any task toggles it between Next and Done, both
+  directions.
+- **`×` on a task row** (appears on hover) deletes it.
+- **`×` in the card header** (appears when you hover the card) deletes
+  the whole card. If it still holds tasks, it asks first -- those
+  tasks live nowhere else.
+- **`Create folder…`** turns it into a real project: pick a parent
+  directory, and it creates `<parent>/<name>`, registers it, and
+  starts tracking it. If the card has unresolved tasks, it then asks
+  whether to **hand them off to Claude** (writes them into the new
+  project's `status.json` *and* opens a session there prompted with
+  the list) or **keep them in the dashboard** (they stay manual, and
+  keep showing on the now-real project's card).
+
+Placeholder cards live in `~/.claude-dashboard/placeholders.json`,
+deliberately outside both `config.json` and the SQLite store -- see
+the module docstring in `busy_bee/placeholder_store.py` for why.
+
+### Where state lives
+
+```
+~/.claude-dashboard/config.json        tracked projects, poll interval, terminal app
+~/.claude-dashboard/db.sqlite          central store the popover reads
+~/.claude-dashboard/placeholders.json  manual cards + their tasks
+<project>/.claude-dashboard/status.json  per-project log the aggregator polls
+/tmp/busybee-agent.log                 the app's stdout/stderr
+```
+
+`config.json` is also where you switch terminals
+(`"terminal_app": "iTerm"`) or change `poll_interval_seconds`.
+
+## Updating after pulling new code
 
 The LaunchAgent runs `.venv/bin/busy-bee` directly, not a frozen
-build -- after pulling code changes, `launchctl unload` then
-`scripts/install_launch_agent.sh` again (or just re-run
-`./scripts/install.sh`) to pick them up. Dependency changes need
-`pip install -e .` re-run first (part of `install.sh`).
+build, so restarting the agent is enough to pick up code changes:
+
+```bash
+git pull
+./scripts/install.sh    # re-runs pip install -e, re-wires hooks, restarts the agent
+```
+
+Re-running the full installer is the safe default -- it's idempotent,
+and it also re-points the hooks if the repo moved or a Claude Code
+update reset `~/.claude/settings.json`. If you only changed Python/UI
+code and nothing else, `bash scripts/install_launch_agent.sh` alone
+restarts the app.
+
+Changes to [`claude_md_snippet.md`](./claude_md_snippet.md) need
+`dashctl setup-global` specifically -- the copy that agents actually
+read lives between the markers in `~/.claude/CLAUDE.md`, and only that
+command rewrites it. Sessions already running keep the old copy until
+they restart.
+
+## Uninstalling
+
+```bash
+# 1. stop the app and remove the LaunchAgent
+launchctl unload ~/Library/LaunchAgents/dev.busybee.app.plist
+rm ~/Library/LaunchAgents/dev.busybee.app.plist
+rm -rf "/Applications/Open Busy Bee.app"
+
+# 2. drop the CLI symlinks (wherever install.sh put them)
+rm -f "$(dirname "$(command -v dashctl)")"/{dashctl,busy-bee}
+
+# 3. remove the Claude Code wiring by hand:
+#    - delete the <!-- busy-bee:start -->...<!-- busy-bee:end --> block
+#      from ~/.claude/CLAUDE.md
+#    - delete the three entries mentioning busy-bee/hooks from
+#      ~/.claude/settings.json (Stop, SessionStart, PostToolUse)
+
+# 4. optional: forget every logged item and manual card
+rm -rf ~/.claude-dashboard
+```
+
+Per-project `.claude-dashboard/status.json` files stay behind in each
+tracked project; delete them if you want the projects fully clean.
+
+## Troubleshooting
+
+**No 🐝 in the menu bar.** Check what's running and what it said:
+
+```bash
+pgrep -fl busy-bee
+tail -20 /tmp/busybee-agent.log
+bash scripts/install_launch_agent.sh   # reinstall + restart the agent
+```
+
+**`dashctl: command not found`** in a new terminal -- the symlink dir
+isn't on `PATH` (see step 2). Add it to `~/.zshrc` and open a new
+terminal, or re-run the installer with `BIN_DIR=` set to a directory
+that is.
+
+**A project never appears on the dashboard.** Cards only render for
+sessions with a live `claude` process, so first make sure one is
+actually running in that directory. Then check the wiring reached it:
+`grep busy-bee ~/.claude/CLAUDE.md` and confirm the session started
+*after* `setup-global` ran (step 3) -- an older session won't have
+read the instructions. Logging one item by hand (`dashctl done "test"`)
+from inside the project is the fastest way to tell whether the CLI
+side works.
+
+**An app icon looks wrong/generic/muted right after (re)building it**
+-- that's very likely a stale icon cache, not a bad icon file.
+Confirmed live: `iconutil -c iconset` on the actual built `.icns`
+showed the correct art even when the Dock was rendering something
+washed-out. `killall Dock` (safe, it relaunches instantly, no data
+loss) forces a re-render and usually fixes it immediately.
+
+**The installer stops on the Python version.** `python3` is older than
+3.10; re-run as `PYTHON=/path/to/python3.12 ./scripts/install.sh`.
 
 ## Architecture
 
@@ -212,7 +390,9 @@ Menu bar widget (rumps + pywebview popover)
         +--> Click project name -> focuses that project's existing
         |    Terminal tab if one's already running claude, else opens
         |    a new one with cd + claude --continue
-        +--> Manual edits (resolve) -> written back into the central store directly
+        +--> Placeholder cards (add/edit/delete tasks, delete card)
+             -> ~/.claude-dashboard/placeholders.json, the only state
+                the UI writes; agent-logged items stay read-only here
 ```
 
 Terminal reuse works by tagging every `dashctl` log with the tty of
@@ -227,18 +407,21 @@ working directory.
 
 ```
 busy_bee/
-  cli.py              dashctl entrypoint
-  project_store.py    per-project status.json read/write
-  config.py           ~/.claude-dashboard/config.json handling
-  process_utils.py    finds which terminal tty a dashctl call came from
-  db.py                central SQLite schema + queries
+  cli.py                dashctl entrypoint
+  project_store.py      per-project status.json read/write
+  placeholder_store.py  manual cards + their tasks (placeholders.json)
+  config.py             ~/.claude-dashboard/config.json handling
+  colors.py             per-project palette slots (shared with Terminal tab tints)
+  process_utils.py      finds which terminal tty a dashctl call came from
+  db.py                 central SQLite schema + queries
   aggregator.py         polls project paths, merges into the central store
   terminal_launcher.py  osascript-driven click-to-resume / terminal reuse
-  app.py                 rumps tray app + pywebview popover wiring
-  icon.py                 renders the bee icon (menu bar + Dock, badge composited in)
-  todo_sync.py             syncs Claude Code's TodoWrite list into dashctl
-  global_setup.py           installs the CLAUDE.md snippet + Stop/SessionStart/PostToolUse hooks globally
-  ui/                        popover.html/css/js, widget.html/js (floating icon)
+  dialogs.py            native folder picker + confirm alerts
+  app.py                rumps tray app + pywebview popover wiring + the JS-facing Api
+  icon.py               renders the bee icon (menu bar + Dock, badge composited in)
+  todo_sync.py          syncs Claude Code's TodoWrite list into dashctl
+  global_setup.py       installs the CLAUDE.md snippet + Stop/SessionStart/PostToolUse hooks globally
+  ui/                   popover.html/css/js, widget.html/js (floating icon)
 hooks/
   stop_hook.py           Claude Code Stop hook (the safety net, also nudges periodic summaries)
   session_start_hook.py  Claude Code SessionStart hook -- registers the directory and marks the new session before it logs anything
@@ -340,10 +523,15 @@ tests/
   stuck at `0x0` despite the file genuinely existing at that path, no
   console error. Use a `data:` URI instead (see
   `Api.get_widget_icon_data_uri`) -- not subject to that restriction.
+- **The popover rebuilds `#cards` wholesale every 5s.** Anything
+  stateful in there (a half-typed task, focus) would be destroyed by
+  the refresh, so `render()` defers while an input inside `#cards` has
+  focus and replays on `focusout`. The "add project" box deliberately
+  lives *outside* `#cards` for the same reason.
 
 ## Tests
 
-```
+```bash
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```

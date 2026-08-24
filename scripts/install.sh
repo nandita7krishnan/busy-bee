@@ -6,7 +6,28 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$REPO_DIR/.venv"
 
-python3 -m venv "$VENV_DIR"
+if [ "$(uname -s)" != "Darwin" ]; then
+    echo "busy-bee is macOS-only (menu bar status item, AppKit, osascript)." >&2
+    exit 1
+fi
+
+# Checked up front rather than left to pip: the failure mode otherwise
+# is a wall of resolver output ending in "requires a different Python",
+# which reads like a broken package rather than "your python3 is too
+# old". A machine with Anaconda or Xcode's python3 first on PATH hits
+# this immediately, so PYTHON= is the documented way out.
+PYTHON="${PYTHON:-python3}"
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    echo "No '$PYTHON' on PATH. Install Python 3.10+ or set PYTHON=/path/to/python3." >&2
+    exit 1
+fi
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+    echo "busy-bee needs Python 3.10+, but '$PYTHON' is $("$PYTHON" -c 'import platform; print(platform.python_version())')." >&2
+    echo "Re-run with a newer one, e.g.: PYTHON=/opt/homebrew/bin/python3.12 ./scripts/install.sh" >&2
+    exit 1
+fi
+
+"$PYTHON" -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
 "$VENV_DIR/bin/pip" install -e "$REPO_DIR"
 

@@ -24,7 +24,11 @@ reasoning/detail out -- it's in your own conversation already.
 - Identified upcoming work: `dashctl todo "<what's next>"` (note its
   id -- once you actually do it, resolve it, see below)
 - Can't proceed without the user: `dashctl blocker "<what's blocking you>"`
-- Need a decision from the user: `dashctl question "<the question>"`
+- Need a decision from the user: `dashctl question "<the question>"`.
+  Required, not optional, whenever a turn ends by asking the user
+  something -- the Stop hook checks for it specifically, since a turn
+  that already logged a `done` otherwise looks "logged" while the
+  question itself never reaches the dashboard.
 - A blocker, question, or todo you logged manually is done: `dashctl
   resolve blocker|question|todo <id>` (the id is printed when it was
   logged). Without this, a manually-logged todo just sits there
