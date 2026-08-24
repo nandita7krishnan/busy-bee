@@ -259,11 +259,34 @@ def test_system_is_dark_mode_false_when_key_is_unset(monkeypatch):
 
 def test_prune_colored_ttys_drops_dead_ttys():
     tl._colored_ttys.clear()
-    tl._colored_ttys.update({"ttys001", "ttys002"})
+    tl._colored_ttys.update({"ttys001": False, "ttys002": False})
 
     tl.prune_colored_ttys({"ttys001"})
 
-    assert tl._colored_ttys == {"ttys001"}
+    assert tl._colored_ttys == {"ttys001": False}
+
+
+def test_switching_the_system_theme_repaints_already_colored_tabs(monkeypatch):
+    # The bug this exists to prevent: a tab painted with the light-mode
+    # tint kept it after the user switched to Dark mode, at which point
+    # Terminal's own text color had flipped to white -- white text on a
+    # near-white background. An uncolored tab never had the problem
+    # (Terminal adapts it), so assigning a color has to adapt too.
+    tl._colored_ttys.clear()
+    colored = []
+    monkeypatch.setattr(tl, "_find_tab_by_tty", lambda tty: {"window_id": "9", "tab_index": "1"})
+    monkeypatch.setattr(tl, "color_tab", lambda wid, idx, color: colored.append(color))
+
+    monkeypatch.setattr(tl, "_system_is_dark_mode", lambda: False)
+    tl.sync_session_colors("my-project", ["ttys002"])
+    monkeypatch.setattr(tl, "_system_is_dark_mode", lambda: True)
+    tl.sync_session_colors("my-project", ["ttys002"])
+    tl.sync_session_colors("my-project", ["ttys002"])  # still dark -> no repaint
+
+    assert colored == [
+        tl.colors.terminal_background_color("my-project", dark=False),
+        tl.colors.terminal_background_color("my-project", dark=True),
+    ]
 
 
 def test_raise_window_uses_front_window_only_activation(monkeypatch):

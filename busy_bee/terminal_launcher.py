@@ -207,7 +207,15 @@ def session_title_for_tty(tty: str) -> str | None:
     return title or None
 
 
-_colored_ttys: set[str] = set()
+# tty -> the light/dark mode its tint was computed for, not just "was
+# this tty colored". Tracking the mode is what lets a theme switch
+# repaint tabs that were already painted: the tint has to flip with the
+# system, and Terminal's own profile flips its *text* color underneath
+# us regardless (Basic renders black text in light mode, white in
+# dark), so a tab left on its old-mode tint ends up either white text
+# on a near-white background or the reverse. Painted once per mode, not
+# once per tty.
+_colored_ttys: dict[str, bool] = {}
 
 
 def _hex_to_terminal_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -233,7 +241,8 @@ def prune_colored_ttys(live_ttys: set[str]) -> None:
     """Drops any tty that's no longer live from the colored set, so if
     that tty number gets reused by a later, unrelated terminal window,
     it gets colored fresh for whichever project that one belongs to."""
-    _colored_ttys.intersection_update(live_ttys)
+    for tty in [t for t in _colored_ttys if t not in live_ttys]:
+        del _colored_ttys[tty]
 
 
 def _system_is_dark_mode() -> bool:
@@ -263,9 +272,19 @@ def sync_session_colors(
     """Colors each of this project's currently-live Terminal tabs to
     match its dashboard card color, the first time we see it live -- a
     visual cue for which project a given terminal window belongs to.
-    No-ops for ttys already colored this run, or that aren't an actual
-    Terminal.app tab (iTerm isn't scriptable the same way here, and a
-    dead tty has no window to find).
+    No-ops for ttys already colored for the current light/dark mode, or
+    that aren't an actual Terminal.app tab (iTerm isn't scriptable the
+    same way here, and a dead tty has no window to find).
+
+    Switching the system theme repaints every live tab on the next pass
+    (~5s, driven by the aggregator). It has to: the tint that reads as
+    a pale background in light mode is the one that makes Dark-mode
+    Terminal's white text unreadable, and a tab that keeps its old-mode
+    tint is exactly the "colored terminals look broken in dark mode"
+    report this comes from. The default, *un*colored tab never had the
+    problem because Terminal adapts it automatically -- assigning a
+    color is what opts a tab out of that, so this has to do the
+    adapting for it.
 
     Uses terminal_background_color, not the vivid project_color used
     for the popover card's border accent -- confirmed via a real
@@ -278,14 +297,14 @@ def sync_session_colors(
     it's a single system-wide setting."""
     dark = _system_is_dark_mode()
     for tty in live_ttys:
-        if tty in _colored_ttys:
+        if _colored_ttys.get(tty) is dark:
             continue
         tab = _find_tab_by_tty(tty)
         if tab is None:
             continue
         color = colors.terminal_background_color(project_name, dark=dark, index=color_index)
         color_tab(tab["window_id"], tab["tab_index"], color)
-        _colored_ttys.add(tty)
+        _colored_ttys[tty] = dark
 
 
 def resume_project(
