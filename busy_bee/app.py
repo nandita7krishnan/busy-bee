@@ -579,11 +579,91 @@ class BusyBeeApp(rumps.App):
         # already-proven-reliable Python-side timer instead of
         # trusting another opaque JS one for the widget too.
         def tick(_timer):
+            # Cheap (a defaults read, then a no-op unless the theme
+            # actually changed) and runs on the main thread, where
+            # AppKit wants it.
+            sync_appearance()
             self.refresh_badge()
             threading.Thread(target=self.api.refresh_popover_content, daemon=True).start()
             threading.Thread(target=self._refresh_widget_icon, daemon=True).start()
 
         rumps.Timer(tick, 5).start()
+
+
+# Kept alive at module scope: NSDistributedNotificationCenter does not
+# retain its observer, and a garbage-collected one takes the theme
+# subscription down with it (silently -- the app just stops following
+# Dark mode again after a while).
+_appearance_observer = None
+
+
+def _system_is_dark() -> bool:
+    """Whether macOS itself is currently in Dark mode.
+
+    Read straight from the global domain rather than inferred from
+    NSApp's own appearance, which is exactly the thing that's wrong
+    here (see _apply_appearance)."""
+    import AppKit
+
+    style = AppKit.NSUserDefaults.standardUserDefaults().stringForKey_("AppleInterfaceStyle")
+    return style == "Dark"
+
+
+def _apply_appearance(dark: bool) -> None:
+    """Pins NSApp's appearance, which is what every WKWebView in the
+    process reports to CSS as `prefers-color-scheme`.
+
+    Without this the popover stays on its light palette on a dark
+    desktop. This process's main bundle is Python.app (see the README's
+    note on bundle identity -- the venv's `busy-bee` shebang re-execs
+    through the framework's Python.app), which is old enough that macOS
+    treats the whole app as Aqua-only, so NSApp never follows the
+    system theme on its own. pywebview knows about this and flips
+    `NSRequiresAquaSystemAppearance` in the bundle's in-memory Info
+    dictionary to compensate -- but that only takes effect if it lands
+    before NSApplication reads the key, and here rumps has already
+    created the shared application by the time pywebview's cocoa
+    backend is imported. Setting the appearance outright doesn't care
+    about that ordering.
+
+    Verified live in a WKWebView: with DarkAqua set this way,
+    `matchMedia("(prefers-color-scheme: dark)")` flips to true and the
+    page's dark tokens take effect immediately, with no reload."""
+    import AppKit
+
+    name = AppKit.NSAppearanceNameDarkAqua if dark else AppKit.NSAppearanceNameAqua
+    current = AppKit.NSApp.appearance()
+    if current is not None and current.name() == name:
+        return
+    AppKit.NSApp.setAppearance_(AppKit.NSAppearance.appearanceNamed_(name))
+
+
+def sync_appearance() -> None:
+    _apply_appearance(_system_is_dark())
+
+
+def watch_system_appearance() -> None:
+    """Follows theme changes made while the app is running. The 5s timer
+    (see start_badge_timer) re-syncs as well, so a missed notification
+    costs a few seconds rather than leaving the popover stuck on the
+    wrong palette until restart."""
+    import AppKit
+
+    global _appearance_observer
+    if _appearance_observer is not None:
+        return
+
+    class _AppearanceObserver(AppKit.NSObject):
+        def themeChanged_(self, _notification):
+            sync_appearance()
+
+    _appearance_observer = _AppearanceObserver.alloc().init()
+    AppKit.NSDistributedNotificationCenter.defaultCenter().addObserver_selector_name_object_(
+        _appearance_observer,
+        "themeChanged:",
+        "AppleInterfaceThemeChangedNotification",
+        None,
+    )
 
 
 def run_aggregator_thread() -> None:
@@ -614,6 +694,9 @@ def _start_rumps_setup_without_blocking(app: BusyBeeApp) -> None:
     AppKit.NSApp.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
     dock_image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon.render_plain_bee()))
     AppKit.NSApp.setApplicationIconImage_(dock_image)
+
+    sync_appearance()
+    watch_system_appearance()
 
     app.start_badge_timer()
     app.refresh_badge()

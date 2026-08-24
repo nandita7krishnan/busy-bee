@@ -1,4 +1,10 @@
 :root {
+  /* Tells WebKit the page has both palettes, so the parts it paints
+     itself -- the canvas behind the page, scrollbars, focus rings, the
+     default control chrome -- follow the theme too, instead of staying
+     light under a dark page. */
+  color-scheme: light dark;
+
   --bg: #ffffff;
   --card-bg: #f7f7f8;
   --text: #1c1c1e;
