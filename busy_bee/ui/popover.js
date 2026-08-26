@@ -149,6 +149,34 @@ function renderPlaceholderCard(project) {
   `;
 }
 
+// The "+ New session" tile -- a ghost block that sits at the end of the
+// sessions row, exactly where the session it starts will appear. Real
+// project cards only: a placeholder has no folder to `cd` into, and its
+// header already carries "Create folder..." as the one action that
+// makes sense there.
+//
+// Collapsed it's just an affordance; clicking expands an optional
+// prompt box, so "open a terminal here" and "open a terminal here and
+// have it start on this" are the same control rather than two. Enter on
+// an empty box is the plain case -- one extra keystroke, which buys the
+// prompt path being discoverable instead of hidden behind a modifier.
+function renderNewSessionTile(project) {
+  const error = newSessionErrors[project.name];
+  return `
+    <div class="new-session" data-new-session>
+      <div class="new-session-cue">
+        <span class="new-session-plus">+</span>
+        <span class="new-session-label">New session</span>
+      </div>
+      <form class="new-session-form" data-new-session-form>
+        <input class="new-session-input" autocomplete="off"
+               placeholder="Enter to start, or type a task first" />
+      </form>
+      ${error ? `<div class="form-error">${escapeHtml(error)}</div>` : ""}
+    </div>
+  `;
+}
+
 function renderRealCard(project) {
   const colorClass = projectColorClass(project);
   const hasFlags = project.blockers.length > 0 || project.questions.length > 0;
@@ -185,12 +213,19 @@ function renderRealCard(project) {
   // declined ones stay on the dashboard only until the folder exists.
   // A separate "From the dashboard" block here just duplicated what
   // the session's own Next column already shows once work starts.
+  // The tile joins the sessions row so it reads as "another one of
+  // these". With no sessions yet -- a project activated from a
+  // placeholder whose folder exists but has never been opened -- it
+  // gets its own row under the columns, which is also the only way to
+  // start that project's first session from the dashboard.
+  const newSessionTile = renderNewSessionTile(project);
   const body = hasSessions
-    ? `<div class="sessions-row">${project.sessions.map(renderSession).join("")}</div>`
+    ? `<div class="sessions-row">${project.sessions.map(renderSession).join("")}${newSessionTile}</div>`
     : `<div class="columns">
         ${renderColumn("Done", project.done, "done", "nothing yet")}
         ${renderColumn("Next", project.todo, "todo", "nothing queued")}
-      </div>`;
+      </div>
+      <div class="sessions-row new-session-row">${newSessionTile}</div>`;
 
   return `
     <div class="card ${colorClass} ${expanded ? "expanded" : ""}" data-project="${escapeHtml(project.name)}">
@@ -232,6 +267,12 @@ let pendingProjects = null;
 // again. A plain variable, not part of the project data itself, since
 // get_projects() has no reason to know about a UI-local failure.
 const createFolderErrors = {};
+
+// Same shape and lifetime as createFolderErrors above: a UI-local
+// failure (a deleted project folder, osascript refusing) that
+// get_projects() has no reason to carry, cleared the moment that card's
+// tile is used again.
+const newSessionErrors = {};
 
 function render(projects) {
   const cardsEl = document.getElementById("cards");
@@ -397,6 +438,60 @@ function render(projects) {
         e.preventDefault();
         e.stopPropagation();
         remove();
+      }
+    });
+  });
+
+  cardsEl.querySelectorAll("[data-new-session]").forEach((tile) => {
+    const input = tile.querySelector(".new-session-input");
+    tile.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // Already open: let clicks land on the input rather than
+      // re-running the expand and stealing the caret position.
+      if (tile.classList.contains("expanded")) return;
+      tile.classList.add("expanded");
+      // Focusing also parks render()'s deferred-render guard on this
+      // card, so the 5s refresh can't collapse the box mid-type.
+      input.focus();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        input.value = "";
+        tile.classList.remove("expanded");
+        input.blur();
+      }
+    });
+  });
+
+  cardsEl.querySelectorAll("[data-new-session-form]").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const tile = form.closest("[data-new-session]");
+      if (tile.classList.contains("disabled")) return; // osascript is
+      // slow enough to double-submit on an impatient second Enter, and
+      // each one would open its own window
+      const input = form.querySelector(".new-session-input");
+      const project = form.closest(".card").dataset.project;
+      tile.classList.add("disabled");
+      delete newSessionErrors[project];
+      try {
+        const result = await window.pywebview.api.open_new_session(
+          project,
+          input.value.trim()
+        );
+        if (!result.ok) {
+          newSessionErrors[project] = result.error || "couldn't open a terminal";
+        }
+      } finally {
+        input.value = "";
+        // Releases the deferred-render guard -- otherwise this very
+        // refresh is the one that gets skipped, and neither the new
+        // session block nor an error message would appear until focus
+        // left the box some other way.
+        input.blur();
+        loadProjects();
       }
     });
   });

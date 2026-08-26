@@ -765,3 +765,102 @@ def test_activate_placeholder_carve_out_keeps_the_card_visible_before_its_first_
     assert projects[0]["placeholder"] is False
     assert projects[0]["sessions"] == []
 
+
+
+def test_open_new_session_launches_a_fresh_session_in_the_project(tmp_path, monkeypatch):
+    root = tmp_path / "a-timeline"
+    root.mkdir()
+    config.add_project("a-timeline", str(root))
+    db.upsert_project("a-timeline", str(root))
+    calls = []
+    monkeypatch.setattr(
+        app.terminal_launcher,
+        "start_new_session",
+        lambda path, terminal_app, prompt=None: calls.append((path, terminal_app, prompt)),
+    )
+
+    assert app.Api().open_new_session("a-timeline") == {"ok": True}
+    assert calls == [(str(root), "Terminal", None)]
+
+
+def test_open_new_session_passes_the_prompt_through(tmp_path, monkeypatch):
+    root = tmp_path / "a-timeline"
+    root.mkdir()
+    db.upsert_project("a-timeline", str(root))
+    calls = []
+    monkeypatch.setattr(
+        app.terminal_launcher,
+        "start_new_session",
+        lambda path, terminal_app, prompt=None: calls.append(prompt),
+    )
+
+    app.Api().open_new_session("a-timeline", "  fix the redirect loop  ")
+    assert calls == ["fix the redirect loop"]
+
+
+def test_open_new_session_treats_a_blank_prompt_as_none(tmp_path, monkeypatch):
+    # An empty box means "just give me a terminal" -- passing "" through
+    # would run `claude ''` and hand the session an empty first message.
+    root = tmp_path / "a-timeline"
+    root.mkdir()
+    db.upsert_project("a-timeline", str(root))
+    calls = []
+    monkeypatch.setattr(
+        app.terminal_launcher,
+        "start_new_session",
+        lambda path, terminal_app, prompt=None: calls.append(prompt),
+    )
+
+    app.Api().open_new_session("a-timeline", "   ")
+    assert calls == [None]
+
+
+def test_open_new_session_refuses_a_project_whose_folder_is_gone(tmp_path, monkeypatch):
+    db.upsert_project("a-timeline", str(tmp_path / "deleted"))
+    monkeypatch.setattr(
+        app.terminal_launcher,
+        "start_new_session",
+        lambda *a, **k: pytest.fail("should not have opened a terminal"),
+    )
+
+    result = app.Api().open_new_session("a-timeline")
+    assert result["ok"] is False
+    assert "no longer exists" in result["error"]
+
+
+def test_open_new_session_reports_an_unknown_project(monkeypatch):
+    result = app.Api().open_new_session("never-registered")
+    assert result["ok"] is False
+
+
+def test_open_new_session_reports_a_failed_launch(tmp_path, monkeypatch):
+    # osascript failing shouldn't take the popover down with it -- the
+    # tile shows the message instead.
+    root = tmp_path / "a-timeline"
+    root.mkdir()
+    db.upsert_project("a-timeline", str(root))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("Terminal is not running")
+
+    monkeypatch.setattr(app.terminal_launcher, "start_new_session", boom)
+
+    result = app.Api().open_new_session("a-timeline")
+    assert result["ok"] is False
+    assert "Terminal is not running" in result["error"]
+
+
+def test_open_new_session_honours_the_configured_terminal_app(tmp_path, monkeypatch):
+    root = tmp_path / "a-timeline"
+    root.mkdir()
+    db.upsert_project("a-timeline", str(root))
+    config.save_config({**config.load_config(), "terminal_app": "iTerm"})
+    calls = []
+    monkeypatch.setattr(
+        app.terminal_launcher,
+        "start_new_session",
+        lambda path, terminal_app, prompt=None: calls.append(terminal_app),
+    )
+
+    app.Api().open_new_session("a-timeline")
+    assert calls == ["iTerm"]

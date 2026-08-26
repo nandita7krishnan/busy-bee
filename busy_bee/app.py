@@ -510,6 +510,38 @@ class Api:
             project["path"], cfg.get("terminal_app", "Terminal"), tty=tty or project["terminal_tty"]
         )
 
+    def open_new_session(self, project_name: str, prompt: str | None = None) -> dict:
+        """Starts an additional, independent `claude` in this project --
+        the "+ New session" tile. Distinct from open_terminal, which
+        refocuses the session that's already running: with a live tty on
+        file, resume_project can only ever take you back to the existing
+        conversation, so there was previously no way to get a second one
+        from the dashboard at all.
+
+        Only ever reachable for a real project: placeholder cards render
+        "Create folder..." in this slot instead. The is_dir() check here
+        is for the other case the UI can't see -- a registered project
+        whose folder has since been moved or deleted, where `cd` would
+        fail inside the new window and leave a broken terminal open.
+
+        `prompt` is optional; empty means a plain session sitting at its
+        own prompt."""
+        project = db.get_project(project_name)
+        if project is None:
+            return {"ok": False, "error": "that project isn't registered"}
+        if not Path(project["path"]).is_dir():
+            return {"ok": False, "error": f"{project['path']} no longer exists"}
+        cfg = config.load_config()
+        try:
+            terminal_launcher.start_new_session(
+                project["path"],
+                cfg.get("terminal_app", "Terminal"),
+                prompt=(prompt or "").strip() or None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"couldn't open a terminal: {exc}"}
+        return {"ok": True}
+
     def open_dashboard(self) -> None:
         """Shows the popover and refreshes its content. Called by the
         floating widget's click handler, and by the tray menu's "Show

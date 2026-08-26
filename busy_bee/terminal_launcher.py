@@ -68,6 +68,29 @@ end tell
 """
 
 
+# The new-session pair, deliberately without `--continue`: these open an
+# *additional*, independent conversation in a project that may well
+# already have one running. `--continue` would resume the existing
+# conversation instead, leaving two windows driving the same session --
+# strictly worse than not opening one at all.
+NEW_SESSION_TERMINAL_APPLESCRIPT = """
+tell application "Terminal"
+    do script "cd {path} && claude {prompt}"
+    return name of window 1
+end tell
+"""
+
+NEW_SESSION_ITERM_APPLESCRIPT = """
+tell application "iTerm"
+    activate
+    set newWindow to (create window with default profile)
+    tell current session of newWindow
+        write text "cd {path} && claude {prompt}"
+    end tell
+end tell
+"""
+
+
 def _applescript_string(value: str) -> str:
     """Escapes a value for embedding inside an AppleScript double-quoted
     string literal. Shell-level quoting (shlex.quote) isn't enough on
@@ -327,16 +350,57 @@ def resume_project(
             _focus_terminal_tab(tab["window_id"], tab["tab_index"])
             return
 
+    _open_window(
+        path,
+        terminal_app,
+        prompt,
+        NEW_TERMINAL_WINDOW_APPLESCRIPT,
+        NEW_ITERM_WINDOW_APPLESCRIPT,
+    )
+
+
+def start_new_session(
+    path: str, terminal_app: str = "Terminal", prompt: str | None = None
+) -> None:
+    """Opens a terminal running a *fresh* `claude` in this project,
+    always in a new window -- never reusing or refocusing an existing
+    session the way resume_project does. Backs the dashboard's
+    "+ New session" tile, so a project that already has a session
+    running can get a second, parallel one without leaving the popover.
+
+    `prompt`, when given, becomes that session's opening message, so it
+    starts on the task immediately instead of waiting at an empty
+    prompt (same mechanism the placeholder handoff uses; see
+    resume_project's docstring for why context injection alone can't
+    do this).
+
+    Nothing needs to register the new session here -- the SessionStart
+    hook fires inside it and the aggregator picks it up on its next
+    pass, which is also when its tab gets tinted this project's color."""
+    _open_window(
+        path,
+        terminal_app,
+        prompt,
+        NEW_SESSION_TERMINAL_APPLESCRIPT,
+        NEW_SESSION_ITERM_APPLESCRIPT,
+    )
+
+
+def _open_window(
+    path: str,
+    terminal_app: str,
+    prompt: str | None,
+    terminal_script: str,
+    iterm_script: str,
+) -> None:
     resolved_path = str(Path(path).resolve())
     # Two layers, in this order: shlex.quote for the shell, then
     # AppleScript escaping for the double-quoted literal wrapping it.
     quoted_path = _applescript_string(shlex.quote(resolved_path))
     quoted_prompt = _applescript_string(shlex.quote(prompt)) if prompt else ""
-    script = (
-        NEW_ITERM_WINDOW_APPLESCRIPT
-        if terminal_app.lower() == "iterm"
-        else NEW_TERMINAL_WINDOW_APPLESCRIPT
-    ).format(path=quoted_path, prompt=quoted_prompt)
+    script = (iterm_script if terminal_app.lower() == "iterm" else terminal_script).format(
+        path=quoted_path, prompt=quoted_prompt
+    )
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, "osascript", result.stdout, result.stderr)

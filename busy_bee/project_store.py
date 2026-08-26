@@ -129,6 +129,46 @@ def resolve_item(project_root: Path, item_type: ItemType, item_id: str) -> bool:
     return False
 
 
+def resolve_flags_on_user_reply(project_root: Path, session_id: str) -> list[dict]:
+    """Marks this session's still-open blockers/questions resolved
+    because the user has just replied to it (see
+    hooks/user_prompt_submit_hook.py). Returns what it resolved.
+
+    A flag means "this session is waiting on you right now", not "this
+    happened once" -- the dock/tray badge is built on exactly that
+    reading. The moment the user sends a message, that's no longer
+    true, so the badge shouldn't still be red. Nothing else clears it
+    that promptly: `dashctl resolve` depends on the agent remembering
+    (the Stop hook only nudges for it once the *next* turn ends, which
+    can be many minutes later), and auto_resolve_dead_sessions
+    deliberately waits until the session ends entirely.
+
+    Resolving a `blocker` here is the deliberately lossy part: the user
+    might have replied about something else entirely and still not have
+    unblocked it. That's accepted rather than special-cased -- if it's
+    genuinely still blocked the agent re-logs it at the end of this
+    turn (the Stop hook enforces that), so the flag comes back on its
+    own within one turn. The alternative, leaving blockers pinned until
+    something explicitly clears them, is what produces a badge that's
+    red for work nobody is actually waiting on.
+
+    Scoped to this session's own items: another terminal's open
+    question isn't answered by a reply typed in this one."""
+    items = _load(project_root)
+    resolved = []
+    for item in items:
+        if (
+            item["type"] in ("blocker", "question")
+            and item["resolved_at"] is None
+            and item.get("session_id") == session_id
+        ):
+            item["resolved_at"] = _now()
+            resolved.append(item)
+    if resolved:
+        _save(project_root, items)
+    return resolved
+
+
 def stale_flags_awaiting_resolve(
     project_root: Path, session_id: str, before: str | None
 ) -> list[dict]:
