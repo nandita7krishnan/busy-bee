@@ -159,7 +159,10 @@ blocker/question anywhere -- the Dock badge is macOS's native
 since status items don't have an equivalent native badge API. There's
 also a small floating widget -- same bee icon, always on top of other
 windows, draggable anywhere on screen (click-and-drag moves it, a
-plain click opens the dashboard, same as the tray menu). Click either
+plain click opens the dashboard, same as the tray menu). Only the bee
+itself and its badge catch clicks; the transparent space around them
+passes clicks through to whatever window is behind, so parking the
+widget over something you still need to use is fine. Click either
 the tray icon → "Show Dashboard", or the widget directly, to open the
 popover. Clicking the popover window's red close button hides it
 rather than actually closing/destroying it, so "Show Dashboard" keeps
@@ -419,6 +422,7 @@ busy_bee/
   dialogs.py            native folder picker + confirm alerts
   app.py                rumps tray app + pywebview popover wiring + the JS-facing Api
   icon.py               renders the bee icon (menu bar + Dock, badge composited in)
+  click_through.py      makes the floating widget click-through except over the bee's silhouette
   todo_sync.py          syncs Claude Code's TodoWrite list into dashctl
   global_setup.py       installs the CLAUDE.md snippet + Stop/SessionStart/PostToolUse hooks globally
   ui/                   popover.html/css/js, widget.html/js (floating icon)

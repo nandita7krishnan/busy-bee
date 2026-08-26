@@ -40,6 +40,7 @@ from PyObjCTools import AppHelper
 
 from busy_bee import (
     aggregator,
+    click_through,
     config,
     db,
     dialogs,
@@ -538,13 +539,21 @@ class Api:
         # naturalWidth/Height stayed 0x0 with a file:// src despite the
         # file genuinely existing. data: URIs aren't subject to that
         # origin restriction.
-        count = db.count_all_unresolved_blockers_and_questions()
-        # Kept proportional to WIDGET_SIZE, plus the same ~1.33x
-        # headroom the original 128-for-96 ratio had for a crisp,
-        # non-blurry render at the window's actual size.
-        path = icon.render_widget_icon(count, size=326)
+        path = current_widget_icon_path()
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
+
+
+def current_widget_icon_path() -> Path:
+    """The icon the floating widget is showing right now. Shared so the
+    click-through mask reads its silhouette out of the very same PNG the
+    widget displays, badge and all -- a mask built from different art
+    would hit-test against a bee that isn't there."""
+    count = db.count_all_unresolved_blockers_and_questions()
+    # Kept proportional to WIDGET_SIZE, plus the same ~1.33x headroom
+    # the original 128-for-96 ratio had for a crisp, non-blurry render
+    # at the window's actual size.
+    return icon.render_widget_icon(count, size=326)
 
 
 class BusyBeeApp(rumps.App):
@@ -552,6 +561,7 @@ class BusyBeeApp(rumps.App):
         super().__init__("busy-bee", icon=str(icon.render_tray_icon(0)), menu=["Show Dashboard"])
         self.api = api
         self.widget_window = widget_window
+        self.click_through = None
 
     @rumps.clicked("Show Dashboard")
     def show_dashboard(self, _sender) -> None:
@@ -586,6 +596,10 @@ class BusyBeeApp(rumps.App):
             self.refresh_badge()
             threading.Thread(target=self.api.refresh_popover_content, daemon=True).start()
             threading.Thread(target=self._refresh_widget_icon, daemon=True).start()
+            # Main thread, which is where both the AppKit drawing this
+            # does and the window it reads belong.
+            if self.click_through is not None:
+                self.click_through.refresh_mask()
 
         rumps.Timer(tick, 5).start()
 
@@ -697,6 +711,10 @@ def _start_rumps_setup_without_blocking(app: BusyBeeApp) -> None:
 
     sync_appearance()
     watch_system_appearance()
+
+    # Stops the widget's transparent margin from swallowing clicks meant
+    # for whatever is behind it -- see click_through's module docstring.
+    app.click_through = click_through.install(app.widget_window, current_widget_icon_path)
 
     app.start_badge_timer()
     app.refresh_badge()
