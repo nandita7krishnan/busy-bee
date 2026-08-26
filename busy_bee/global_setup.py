@@ -1,7 +1,7 @@
 """One-time global wiring, run once via `dashctl setup-global`.
 
-Instead of pasting the CLAUDE.md snippet and wiring the Stop hook into
-every tracked project individually, this installs both at the Claude
+Instead of pasting the CLAUDE.md snippet and wiring the hooks into
+every tracked project individually, this installs them at the Claude
 Code *user* level (~/.claude/CLAUDE.md and ~/.claude/settings.json),
 so every project on the machine gets them automatically. Combined with
 dashctl auto-registering a project the first time it logs anything
@@ -27,6 +27,7 @@ SNIPPET_PATH = REPO_ROOT / "claude_md_snippet.md"
 STOP_HOOK_PATH = REPO_ROOT / "hooks" / "stop_hook.py"
 TODO_SYNC_HOOK_PATH = REPO_ROOT / "hooks" / "todo_sync_hook.py"
 SESSION_START_HOOK_PATH = REPO_ROOT / "hooks" / "session_start_hook.py"
+USER_PROMPT_SUBMIT_HOOK_PATH = REPO_ROOT / "hooks" / "user_prompt_submit_hook.py"
 
 MARKER_START = "<!-- busy-bee:start -->"
 MARKER_END = "<!-- busy-bee:end -->"
@@ -87,11 +88,18 @@ def install_session_start_hook(python_path: str = "python3") -> str:
     return _install_hook("SessionStart", f"{python_path} {SESSION_START_HOOK_PATH}")
 
 
+def install_user_prompt_submit_hook(python_path: str = "python3") -> str:
+    return _install_hook(
+        "UserPromptSubmit", f"{python_path} {USER_PROMPT_SUBMIT_HOOK_PATH}"
+    )
+
+
 def main() -> int:
     print(f"CLAUDE.md snippet: {install_claude_md_snippet()}")
     print(f"Stop hook: {install_stop_hook()}")
     print(f"TodoWrite sync hook: {install_todo_sync_hook()}")
     print(f"SessionStart hook: {install_session_start_hook()}")
+    print(f"UserPromptSubmit hook: {install_user_prompt_submit_hook()}")
     print()
     print("Every Claude Code session on this machine will now log status to")
     print("busy-bee, and dashctl auto-registers a project the first time it")
