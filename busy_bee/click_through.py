@@ -51,6 +51,43 @@ _POLL_INTERVAL = 0.02
 
 _controller = None  # module-scope: an NSTimer's target is not retained
 
+# The widget window, for the acceptsFirstMouse: override below.
+_first_click_window = None
+_first_click_installed = False
+
+
+def _accept_first_click(ns_window) -> None:
+    """Makes a click on the widget count even when busy-bee isn't the
+    active app.
+
+    macOS discards the click that activates an application unless the
+    view under it opts in via acceptsFirstMouse:, and WKWebView does
+    not (verified: it returns NO). So clicking the bee from inside some
+    other app took two clicks -- one to bring busy-bee forward, another
+    to actually open the dashboard -- which defeats the point of an
+    always-on-top button you can hit from anywhere.
+
+    pywebview builds its WKWebView subclass itself, so this goes on as
+    a category. Scoped to the widget's own window: the popover is an
+    ordinary window and should keep the ordinary behaviour, where the
+    first click just brings it forward.
+    """
+    global _first_click_window, _first_click_installed
+
+    _first_click_window = ns_window
+    if _first_click_installed:
+        return
+
+    import objc
+    from webview.platforms.cocoa import BrowserView
+
+    class WebKitHost(objc.Category(BrowserView.WebKitHost)):
+        def acceptsFirstMouse_(self, event):  # noqa: N802 -- AppKit selector
+            return self.window() == _first_click_window
+
+    _first_click_installed = True
+
+
 
 def _alpha_mask(path: Path, dim: int = _MASK_DIM) -> bytearray | None:
     """Redraws the icon into a known 8-bit RGBA bitmap and returns a
@@ -247,6 +284,7 @@ def install(widget_window, icon_path_provider) -> ClickThrough | None:
         )
         return None
 
+    _accept_first_click(ns_window)
     _controller = ClickThrough(ns_window, icon_path_provider)
     _controller.start()
     return _controller

@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from busy_bee import click_through
 
 WIDGET_HTML = Path(__file__).resolve().parent.parent / "busy_bee" / "ui" / "widget.html"
@@ -124,3 +126,31 @@ def test_the_window_is_only_told_about_actual_changes():
     controller._apply(True)
     assert window.set_calls == 1
     assert window.ignores_mouse_events is False
+
+
+def test_only_the_widget_window_accepts_the_activating_click():
+    # macOS throws away the click that activates an app unless the view
+    # under it opts in, so clicking the always-on-top bee from another
+    # app used to take two clicks. The popover is an ordinary window and
+    # keeps the ordinary behaviour.
+    pytest.importorskip("webview.platforms.cocoa")
+    import Foundation
+    from webview.platforms.cocoa import BrowserView
+
+    def _window(w, h):
+        return BrowserView.WindowHost.alloc().initWithContentRect_styleMask_backing_defer_(
+            Foundation.NSMakeRect(0, 0, w, h), 0, 2, False
+        )
+
+    def _view(window, w, h):
+        host = BrowserView.WebKitHost.alloc().initWithFrame_(Foundation.NSMakeRect(0, 0, w, h))
+        window.setContentView_(host)
+        return host
+
+    widget, popover = _window(245, 245), _window(480, 620)
+    widget_view, popover_view = _view(widget, 245, 245), _view(popover, 480, 620)
+
+    click_through._accept_first_click(widget)
+
+    assert widget_view.acceptsFirstMouse_(None)
+    assert not popover_view.acceptsFirstMouse_(None)
