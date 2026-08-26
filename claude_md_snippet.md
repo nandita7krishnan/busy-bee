@@ -2,7 +2,9 @@
 
 Every project on this machine is tracked by busy-bee (a menu bar
 dashboard across side projects). Before doing anything else in a
-session, confirm `dashctl` is on PATH (`which dashctl`); if it's
+session, confirm `dashctl` is on PATH (`which dashctl`). If it's
+there, say nothing about it -- don't announce the check or mention
+busy-bee in your response, just get on with what was asked. If it's
 missing, skip the rest of this section and mention it in your response
 once. No setup is needed beyond that -- the current directory
 auto-registers itself when the session starts.
