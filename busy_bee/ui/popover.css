@@ -496,3 +496,82 @@ body {
   opacity: 0.4;
   pointer-events: none;
 }
+
+/* "+ New session" tile -- lives in .sessions-row alongside real session
+   blocks, so it reads as "another one of these". Dashed rather than
+   solid, and align-self:flex-start rather than the row's default
+   stretch: it's a placeholder for a session that doesn't exist yet, and
+   letting it stretch to a tall session block's height turns it into a
+   large empty box that draws more attention than the sessions do. */
+.new-session {
+  flex: 1 1 200px;
+  min-width: 0;
+  align-self: flex-start;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.new-session:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.new-session-cue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.new-session-plus {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Collapsed by default; the click handler adds .expanded and focuses
+   the input, which also parks render()'s deferred-render guard on this
+   card so the 5s refresh can't collapse it mid-type. */
+.new-session-form { display: none; }
+
+.new-session.expanded {
+  cursor: default;
+  border-style: solid;
+}
+
+.new-session.expanded .new-session-form {
+  display: flex;
+  margin-top: 6px;
+}
+
+.new-session-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.new-session-input:focus {
+  outline: none;
+  border-color: var(--text-muted);
+  box-shadow: 0 0 0 2px rgba(127, 127, 127, 0.18);
+}
+
+/* Held for the duration of the osascript call -- an impatient second
+   Enter would otherwise open a second window. */
+.new-session.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* A real project with no live session yet (folder just created from a
+   placeholder) renders the tile on its own row under the columns
+   instead of inside a sessions row. */
+.new-session-row { margin-top: 10px; }

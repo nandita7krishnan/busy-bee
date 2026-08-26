@@ -333,3 +333,82 @@ def test_no_applescript_activates_the_whole_app():
     # Every remaining `activate` must be the deliberate fallback only.
     for script in (tl.FOCUS_TAB_APPLESCRIPT, tl.NEW_TERMINAL_WINDOW_APPLESCRIPT):
         assert "activate" not in script
+
+
+def test_start_new_session_never_passes_continue(monkeypatch):
+    # The whole point of a *new* session: `--continue` would resume the
+    # conversation that's already running, leaving two windows driving
+    # one session instead of two independent ones.
+    scripts = []
+    monkeypatch.setattr(
+        tl.subprocess, "run", lambda cmd, **k: scripts.append(cmd[-1]) or FakeResult()
+    )
+    tl.start_new_session("/tmp/proj", "Terminal")
+    assert "--continue" not in scripts[0]
+    assert "claude" in scripts[0]
+
+
+def test_start_new_session_opens_a_window_even_with_a_live_tty(monkeypatch):
+    # resume_project refocuses in this situation; start_new_session must
+    # not -- it has no tty argument at all, so there's nothing to reuse.
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd[-1])
+        return FakeResult()
+
+    monkeypatch.setattr(tl.subprocess, "run", fake_run)
+    monkeypatch.setattr(tl, "_tty_has_live_claude", lambda tty: True)
+    tl.start_new_session("/tmp/proj", "Terminal")
+    assert any("do script" in c for c in calls)
+
+
+def test_start_new_session_embeds_the_prompt(monkeypatch):
+    scripts = []
+    monkeypatch.setattr(
+        tl.subprocess, "run", lambda cmd, **k: scripts.append(cmd[-1]) or FakeResult()
+    )
+    tl.start_new_session("/tmp/proj", "Terminal", prompt="fix the redirect loop")
+    assert "fix the redirect loop" in scripts[0]
+
+
+def test_start_new_session_escapes_a_quote_in_the_prompt(monkeypatch):
+    # Two layers of quoting (shell, then the AppleScript literal wrapping
+    # it) -- a bare " in the task wording would otherwise end the
+    # AppleScript string early and mangle the command.
+    scripts = []
+    monkeypatch.setattr(
+        tl.subprocess, "run", lambda cmd, **k: scripts.append(cmd[-1]) or FakeResult()
+    )
+    tl.start_new_session("/tmp/proj", "Terminal", prompt='rename "Next" to "Up next"')
+    assert '\\"' in scripts[0]
+
+
+def test_start_new_session_uses_the_iterm_script_for_iterm(monkeypatch):
+    scripts = []
+    monkeypatch.setattr(
+        tl.subprocess, "run", lambda cmd, **k: scripts.append(cmd[-1]) or FakeResult()
+    )
+    tl.start_new_session("/tmp/proj", "iTerm")
+    assert 'tell application "iTerm"' in scripts[0]
+    assert "--continue" not in scripts[0]
+
+
+def test_start_new_session_raises_when_osascript_fails(monkeypatch):
+    class Failure(FakeResult):
+        stderr = "Terminal got an error"
+
+    monkeypatch.setattr(tl.subprocess, "run", lambda cmd, **k: Failure(returncode=1))
+    with pytest.raises(tl.subprocess.CalledProcessError):
+        tl.start_new_session("/tmp/proj", "Terminal")
+
+
+def test_resume_project_still_continues_the_existing_conversation(monkeypatch):
+    # The counterpart to the new-session scripts: opening a project with
+    # no live session should still pick its conversation back up.
+    scripts = []
+    monkeypatch.setattr(
+        tl.subprocess, "run", lambda cmd, **k: scripts.append(cmd[-1]) or FakeResult()
+    )
+    tl.resume_project("/tmp/proj", "Terminal")
+    assert "--continue" in scripts[0]

@@ -101,7 +101,8 @@ also choose the directory up front with `BIN_DIR=... ./scripts/install.sh`.
 [`claude_md_snippet.md`](./claude_md_snippet.md) into
 `~/.claude/CLAUDE.md` (between `<!-- busy-bee:start -->` /
 `<!-- busy-bee:end -->` markers) and the [`Stop`](./hooks/stop_hook.py),
-[`SessionStart`](./hooks/session_start_hook.py), and
+[`SessionStart`](./hooks/session_start_hook.py),
+[`UserPromptSubmit`](./hooks/user_prompt_submit_hook.py), and
 `PostToolUse`/`TodoWrite` (`hooks/todo_sync_hook.py`) hooks into
 `~/.claude/settings.json`, all at the Claude Code *user* level. This
 is what makes tracking automatic: every Claude Code session on the
@@ -115,7 +116,7 @@ Check it landed:
 
 ```bash
 grep -c busy-bee ~/.claude/CLAUDE.md          # >= 1
-grep -c busy-bee/hooks ~/.claude/settings.json # 3 (Stop, SessionStart, TodoWrite)
+grep -c busy-bee/hooks ~/.claude/settings.json # 4 (Stop, SessionStart, UserPromptSubmit, TodoWrite)
 ```
 
 The hooks are registered to run under plain `python3`, not the venv's
@@ -250,6 +251,28 @@ nothing on them can be edited or ticked off by hand, because doing so
 would let the dashboard drift from the terminal it's reflecting.
 Resolution happens in the session, via `dashctl resolve`.
 
+A blocker or question clears on its own the moment you reply to the
+session that raised it -- a `UserPromptSubmit` hook
+(`hooks/user_prompt_submit_hook.py`) resolves that session's open flags
+as your message goes in, so the tray/Dock badge stops being red the
+instant it stops being true. It's scoped to the one session you
+answered; a second live session in the same project keeps its own
+flags. This is deliberately a little lossy for blockers: reply about
+something else and a genuinely-still-blocked session gets cleared
+anyway, then re-logs at the end of that turn (the Stop hook makes sure
+of it), so the flag returns within one turn rather than being lost.
+The alternative -- pinning it until something explicitly resolves it --
+is what produced a badge that stayed red for questions answered ten
+minutes earlier.
+
+**`+ New session`** at the end of a card's session row starts an
+*additional* `claude` in that project, in its own window -- clicking
+the project name only ever refocuses the session already running, so
+this is the way to get a second one going in parallel. Click the tile
+and it opens a box: hit Enter for a plain session, or type a task first
+and the new session opens already working on it. Real projects only;
+placeholder cards offer `Create folder...` in the same spot.
+
 ### Cards for projects that don't exist yet
 
 The box at the top of the popover ("what else is cooking?") adds a
@@ -326,8 +349,9 @@ rm -f "$(dirname "$(command -v dashctl)")"/{dashctl,busy-bee}
 # 3. remove the Claude Code wiring by hand:
 #    - delete the <!-- busy-bee:start -->...<!-- busy-bee:end --> block
 #      from ~/.claude/CLAUDE.md
-#    - delete the three entries mentioning busy-bee/hooks from
-#      ~/.claude/settings.json (Stop, SessionStart, PostToolUse)
+#    - delete the four entries mentioning busy-bee/hooks from
+#      ~/.claude/settings.json (Stop, SessionStart, UserPromptSubmit,
+#      PostToolUse)
 
 # 4. optional: forget every logged item and manual card
 rm -rf ~/.claude-dashboard
@@ -393,6 +417,8 @@ Menu bar widget (rumps + pywebview popover)
         +--> Click project name -> focuses that project's existing
         |    Terminal tab if one's already running claude, else opens
         |    a new one with cd + claude --continue
+        +--> "+ New session" tile -> always opens a new window running a
+        |    fresh claude (no --continue, optionally prompted)
         +--> Placeholder cards (add/edit/delete tasks, delete card)
              -> ~/.claude-dashboard/placeholders.json, the only state
                 the UI writes; agent-logged items stay read-only here
@@ -424,11 +450,12 @@ busy_bee/
   icon.py               renders the bee icon (menu bar + Dock, badge composited in)
   click_through.py      makes the floating widget click-through except over the bee's silhouette
   todo_sync.py          syncs Claude Code's TodoWrite list into dashctl
-  global_setup.py       installs the CLAUDE.md snippet + Stop/SessionStart/PostToolUse hooks globally
+  global_setup.py       installs the CLAUDE.md snippet + Stop/SessionStart/UserPromptSubmit/PostToolUse hooks globally
   ui/                   popover.html/css/js, widget.html/js (floating icon)
 hooks/
   stop_hook.py           Claude Code Stop hook (the safety net, also nudges periodic summaries)
   session_start_hook.py  Claude Code SessionStart hook -- registers the directory and marks the new session before it logs anything
+  user_prompt_submit_hook.py  Claude Code UserPromptSubmit hook -- clears the session's open blockers/questions the moment you reply
   todo_sync_hook.py      PostToolUse/TodoWrite hook -- calls busy_bee/todo_sync.py
 claude_md_snippet.md   installed into ~/.claude/CLAUDE.md by setup-global
 scripts/
