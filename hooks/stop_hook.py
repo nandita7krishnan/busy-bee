@@ -18,6 +18,12 @@ satisfied the generic "something was logged" check below, so a trailing
 question never got flagged and the dashboard never showed it -- the
 agent's own judgment alone wasn't reliably catching this pattern.
 
+Every unmet requirement above is reported in one block, not one per
+turn. Stopping at the first one hid the rest: a turn owing a summary
+*and* ending on a question was told about the summary only, and the
+follow-up turn short-circuits at `stop_hook_active`, so the question
+check never ran and the question never reached the dashboard.
+
 Wire it up in the project's .claude/settings.json:
 
 {
@@ -130,6 +136,15 @@ def main() -> int:
         # Project isn't tracked by busy-bee -- nothing to enforce.
         return 0
 
+    # Every unmet requirement goes in here and they're reported together
+    # in a single block. Returning at the first one instead used to hide
+    # the others: a turn that both owed a summary and ended on a question
+    # got told about the summary only, and the follow-up turn -- where
+    # the question was still unlogged -- short-circuits at the
+    # stop_hook_active guard above, so the question check never ran at
+    # all and the question never reached the dashboard.
+    reasons: list[str] = []
+
     session_id = process_utils.current_session_id()
     if session_id is not None:
         turn_count, turn_started_at = project_store.bump_turn_count(project_root, session_id)
@@ -137,18 +152,10 @@ def main() -> int:
         if needs_summary and not project_store.summary_logged_since(
             project_root, session_id, turn_started_at
         ):
-            print(
-                json.dumps(
-                    {
-                        "decision": "block",
-                        "reason": (
-                            f"Turn {turn_count}: also log `dashctl summary \"...\"` "
-                            "(one sentence on where things stand) before finishing."
-                        ),
-                    }
-                )
+            reasons.append(
+                f'Turn {turn_count}: also log `dashctl summary "..."` '
+                "(one sentence on where things stand) before finishing."
             )
-            return 0
 
         # A blocker/question this session raised on an earlier turn is
         # one the user has since replied to, so it should have been
@@ -163,56 +170,39 @@ def main() -> int:
         )
         if stale:
             listed = "; ".join(f"{i['type']} [{i['id']}] {i['text']!r}" for i in stale[:3])
-            print(
-                json.dumps(
-                    {
-                        "decision": "block",
-                        "reason": (
-                            f"The user has replied since you logged: {listed}. "
-                            "Resolve what's been answered with `dashctl resolve "
-                            "blocker|question <id>` (then re-log it if it's "
-                            "somehow still open)."
-                        ),
-                    }
-                )
+            reasons.append(
+                f"The user has replied since you logged: {listed}. "
+                "Resolve what's been answered with `dashctl resolve "
+                "blocker|question <id>` (then re-log it if it's "
+                "somehow still open)."
             )
-            return 0
 
     if _awaiting_user_response(_last_assistant_text(payload.get("transcript_path"))) and not (
         project_store.has_logged_this_turn(
             project_root, since_seconds=RECENT_WINDOW_SECONDS, item_type="question"
         )
     ):
-        print(
-            json.dumps(
-                {
-                    "decision": "block",
-                    "reason": (
-                        "This turn ends on a question for the user -- log it "
-                        'specifically: `dashctl question "..."`.'
-                    ),
-                }
-            )
+        reasons.append(
+            "This turn ends on a question for the user -- log it "
+            'specifically: `dashctl question "..."`.'
         )
+    elif not project_store.has_logged_this_turn(
+        project_root, since_seconds=RECENT_WINDOW_SECONDS
+    ):
+        # Logging the question the branch above asks for would satisfy
+        # this too, so it's only worth saying when that isn't already
+        # being asked.
+        reasons.append(
+            "Before finishing, log a one-line status with dashctl: "
+            '`dashctl done "..."`, `dashctl todo "..."`, '
+            '`dashctl blocker "..."`, or `dashctl question "..."`.'
+        )
+
+    if not reasons:
         return 0
 
-    if project_store.has_logged_this_turn(project_root, since_seconds=RECENT_WINDOW_SECONDS):
-        return 0
-
-    print(
-        json.dumps(
-            {
-                "decision": "block",
-                "reason": (
-                    "Before finishing, log a one-line status with dashctl: "
-                    "`dashctl done \"...\"`, `dashctl todo \"...\"`, "
-                    "`dashctl blocker \"...\"`, or `dashctl question \"...\"`."
-                ),
-            }
-        )
-    )
+    print(json.dumps({"decision": "block", "reason": " ".join(reasons)}))
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

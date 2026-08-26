@@ -206,3 +206,35 @@ def test_missing_transcript_path_skips_question_check(monkeypatch, capsys, tmp_p
 
     project_store.add_item(tmp_path, "done", "tuned the prompts")
     assert _run(monkeypatch, capsys, tmp_path) is None
+
+
+def test_summary_and_question_are_reported_together(monkeypatch, capsys, tmp_path):
+    # Turn 1 owes a summary and also ends on a question. Reporting only
+    # the summary let the question slip: the follow-up turn that logs it
+    # short-circuits at stop_hook_active, so the question check never
+    # runs again and the question never reaches the dashboard.
+    project_store.add_item(tmp_path, "done", "did a thing")  # creates status.json, turn 1
+    transcript = _write_transcript(tmp_path, "Want me to go ahead and do that now?")
+
+    result = _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)})
+
+    assert result["decision"] == "block"
+    assert "summary" in result["reason"]
+    assert "dashctl question" in result["reason"]
+
+
+def test_generic_reminder_is_dropped_when_a_question_is_already_demanded(
+    monkeypatch, capsys, tmp_path
+):
+    # Nothing logged this turn and the turn ends on a question -- the
+    # `dashctl question` call being asked for satisfies the generic
+    # check too, so don't ask for both.
+    project_store.add_item(tmp_path, "summary", "seed")  # turn 1
+    assert _run(monkeypatch, capsys, tmp_path) is None
+
+    transcript = _write_transcript(tmp_path, "Want me to go ahead and do that now?")
+    result = _run(monkeypatch, capsys, tmp_path, {"transcript_path": str(transcript)})
+
+    assert result["decision"] == "block"
+    assert "dashctl question" in result["reason"]
+    assert "dashctl todo" not in result["reason"]
