@@ -7,6 +7,10 @@ name = "busy-bee"
 version = "0.1.0"
 description = "A macOS menu bar dashboard across Claude Code side projects."
 requires-python = ">=3.10"
+# Table form rather than the PEP 639 SPDX string (license = "MIT"),
+# which setuptools only understands from 77 on -- the build pins >=68.
+license = {text = "MIT"}
+classifiers = ["License :: OSI Approved :: MIT License"]
 dependencies = [
     "rumps>=0.4.0",
     "pywebview>=5.0",
