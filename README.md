@@ -566,3 +566,7 @@ tests/
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
+
+## License
+
+MIT -- see [LICENSE](./LICENSE).
