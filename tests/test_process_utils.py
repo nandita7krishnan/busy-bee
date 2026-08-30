@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from busy_bee import process_utils as pu
 
@@ -104,3 +105,35 @@ def test_claude_session_start_times_skips_unparseable_elapsed_time(monkeypatch):
     )
     assert pu.claude_session_start_times() == {}
 
+
+
+def test_claude_session_cwd_reads_the_sessions_directory(monkeypatch):
+    monkeypatch.setattr(pu, "find_claude_ancestor_pid", lambda: "4242")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return FakeResult(stdout="p4242\nfcwd\nn/Users/x/point-not-so-mid\n")
+
+    monkeypatch.setattr(pu.subprocess, "run", fake_run)
+
+    assert pu.claude_session_cwd() == Path("/Users/x/point-not-so-mid")
+    assert "4242" in calls[0]
+
+
+def test_claude_session_cwd_is_none_outside_a_session(monkeypatch):
+    monkeypatch.setattr(pu, "find_claude_ancestor_pid", lambda: None)
+    monkeypatch.delenv("CLAUDE_PID", raising=False)
+
+    assert pu.claude_session_cwd() is None
+
+
+def test_claude_session_cwd_survives_a_missing_lsof(monkeypatch):
+    monkeypatch.setattr(pu, "find_claude_ancestor_pid", lambda: "4242")
+
+    def boom(cmd, **kwargs):
+        raise FileNotFoundError("lsof")
+
+    monkeypatch.setattr(pu.subprocess, "run", boom)
+
+    assert pu.claude_session_cwd() is None

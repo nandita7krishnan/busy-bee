@@ -11,6 +11,11 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "HOME_DIR", tmp_path / "cfg")
     monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: None)
     monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: None)
+    # No enclosing Claude Code session by default, so these exercise the
+    # cwd fallback. Without it the suite picks up the *real* session
+    # running it -- which is exactly the signal _project_root is built
+    # on, so the tests that want it say so explicitly instead.
+    monkeypatch.setattr(cli.process_utils, "claude_session_cwd", lambda: None)
     yield
 
 
@@ -183,3 +188,148 @@ def test_untrack_unknown_project_still_clears_db(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "wasn't in config.json" in out
     assert "untracked 'never-registered'" in out
+
+
+def test_log_from_subdirectory_goes_to_the_enclosing_project(tmp_path, monkeypatch):
+    project_dir = tmp_path / "point-not-so-mid"
+    subdir = project_dir / "backend"
+    subdir.mkdir(parents=True)
+    config.add_project("point-not-so-mid", str(project_dir))
+
+    monkeypatch.chdir(subdir)
+    assert cli.main(["done", "wired up the API"]) == 0
+
+    # No second project called "backend" sitting next to its own parent.
+    assert [p["name"] for p in config.list_projects()] == ["point-not-so-mid"]
+    assert [i["text"] for i in project_store.all_items(project_dir)] == ["wired up the API"]
+    assert not (subdir / ".claude-dashboard").exists()
+
+
+def test_log_from_subdirectory_uses_the_nearest_tracked_project(tmp_path, monkeypatch):
+    outer = tmp_path / "outer"
+    inner = outer / "vendored" / "inner"
+    deeper = inner / "src"
+    deeper.mkdir(parents=True)
+    config.add_project("outer", str(outer))
+    config.add_project("inner", str(inner))  # explicitly tracked in its own right
+
+    monkeypatch.chdir(deeper)
+    assert cli.main(["done", "inner work"]) == 0
+
+    assert [i["text"] for i in project_store.all_items(inner)] == ["inner work"]
+    assert project_store.all_items(outer) == []
+
+
+def test_init_still_tracks_a_subdirectory_explicitly(tmp_path, monkeypatch, capsys):
+    project_dir = tmp_path / "point-not-so-mid"
+    subdir = project_dir / "backend"
+    subdir.mkdir(parents=True)
+    config.add_project("point-not-so-mid", str(project_dir))
+
+    monkeypatch.chdir(subdir)
+    assert cli.main(["init"]) == 0
+    capsys.readouterr()
+
+    assert {p["name"]: p["path"] for p in config.list_projects()} == {
+        "point-not-so-mid": str(project_dir),
+        "backend": str(subdir),
+    }
+
+
+def test_first_session_in_a_subdirectory_registers_the_repo_not_the_subdirectory(
+    tmp_path, monkeypatch
+):
+    # The other half of the same bug: nothing is tracked yet, so
+    # enclosing_project can't help -- without a notion of the repo, the
+    # subdirectory's own name is what the project gets called forever.
+    repo = tmp_path / "point-not-so-mid"
+    subdir = repo / "backend"
+    subdir.mkdir(parents=True)
+    (repo / ".git").mkdir()
+
+    monkeypatch.chdir(subdir)
+    assert cli.main(["done", "wired up the API"]) == 0
+
+    assert [(p["name"], p["path"]) for p in config.list_projects()] == [
+        ("point-not-so-mid", str(repo))
+    ]
+    assert [i["text"] for i in project_store.all_items(repo)] == ["wired up the API"]
+
+
+def test_directory_outside_any_repo_is_still_registered_as_itself(tmp_path, monkeypatch):
+    # Not every project folder is a git repo -- those keep working the
+    # way they did, registered under their own name.
+    project_dir = tmp_path / "Grocery Shopping"
+    project_dir.mkdir()
+
+    monkeypatch.chdir(project_dir)
+    assert cli.main(["done", "planned the week"]) == 0
+
+    assert [p["path"] for p in config.list_projects()] == [str(project_dir)]
+
+
+def test_dotfiles_repo_at_home_does_not_swallow_projects_beneath_it(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".git").mkdir(parents=True)
+    project_dir = home / "a-timeline"
+    project_dir.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+
+    monkeypatch.chdir(project_dir)
+    assert cli.main(["done", "sketched the timeline"]) == 0
+
+    assert [(p["name"], p["path"]) for p in config.list_projects()] == [
+        ("a-timeline", str(project_dir))
+    ]
+
+
+def test_logs_go_to_the_session_directory_not_the_shells_cwd(tmp_path, monkeypatch):
+    # The way this actually happened: the session was opened in the
+    # project, then the agent cd'd into a subdirectory to work and
+    # logged from there.
+    repo = tmp_path / "point-not-so-mid"
+    subdir = repo / "backend"
+    subdir.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    monkeypatch.setattr(cli.process_utils, "claude_session_cwd", lambda: repo)
+
+    monkeypatch.chdir(subdir)
+    assert cli.main(["done", "wired up the API"]) == 0
+
+    assert [(p["name"], p["path"]) for p in config.list_projects()] == [
+        ("point-not-so-mid", str(repo))
+    ]
+    assert [i["text"] for i in project_store.all_items(repo)] == ["wired up the API"]
+
+
+def test_logs_from_the_session_scratchpad_still_reach_the_project(tmp_path, monkeypatch):
+    # Same failure, different destination: the agent cd's into its
+    # scratchpad under /tmp, which isn't inside the project at all.
+    repo = tmp_path / "point-not-so-mid"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    scratchpad = tmp_path / "scratch" / "scratchpad"
+    scratchpad.mkdir(parents=True)
+    monkeypatch.setattr(cli.process_utils, "claude_session_cwd", lambda: repo)
+
+    monkeypatch.chdir(scratchpad)
+    assert cli.main(["done", "ran the script"]) == 0
+
+    assert [p["path"] for p in config.list_projects()] == [str(repo)]
+    assert not (scratchpad / ".claude-dashboard").exists()
+
+
+def test_session_started_in_home_falls_back_to_the_working_directory(tmp_path, monkeypatch):
+    # $HOME identifies no project, so the directory actually being
+    # worked in is the better guess -- the pre-existing behaviour.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(cli.process_utils, "claude_session_cwd", lambda: home)
+    project_dir = home / "a-timeline"
+    project_dir.mkdir()
+
+    monkeypatch.chdir(project_dir)
+    assert cli.main(["done", "sketched the timeline"]) == 0
+
+    assert [p["path"] for p in config.list_projects()] == [str(project_dir)]

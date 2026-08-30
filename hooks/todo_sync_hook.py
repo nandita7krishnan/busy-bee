@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from busy_bee import todo_sync  # noqa: E402
+from busy_bee import config, todo_sync  # noqa: E402
 
 
 def main() -> int:
@@ -48,7 +48,10 @@ def main() -> int:
         return 0
 
     cwd = payload.get("cwd") or str(Path.cwd())
-    todo_sync.sync_todos(Path(cwd), todos)
+    # Syncs into the project containing cwd, so todos from a session
+    # working in a subdirectory land on that project's card instead of
+    # creating a stray .claude-dashboard inside the subdirectory.
+    todo_sync.sync_todos(config.project_root_for(cwd), todos)
     return 0
 
 

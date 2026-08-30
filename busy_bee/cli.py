@@ -13,11 +13,11 @@ lists, just as a short line next to the project name in the dashboard
 it when wrapping up a chunk of work or a session, to capture "where
 things stand" in a sentence.
 
-The current directory is auto-registered as a tracked project the
-first time any of the log commands runs (and, earlier still, by the
-SessionStart hook as soon as a session opens in it) -- no separate
-init step needed once `dashctl setup-global` has wired up the
-CLAUDE.md snippet and hooks globally (see global_setup.py).
+The project is auto-registered as a tracked project the first time
+any of the log commands runs (and, earlier still, by the SessionStart
+hook as soon as a session opens in it) -- no separate init step needed
+once `dashctl setup-global` has wired up the CLAUDE.md snippet and
+hooks globally (see global_setup.py).
 
 Also:
 
@@ -31,9 +31,10 @@ Also:
                                   hooks at the Claude Code user level so
                                   every project gets tracked automatically
 
-Operates on the current working directory as the project root -- the
-agent runs these from inside the project, same as any other CLI tool
-in its session.
+Logs against the project the *session* is working on, not the shell's
+current directory -- the agent runs these from wherever it happens to
+be at the time, which may be a subdirectory or the scratchpad. See
+_project_root.
 """
 
 from __future__ import annotations
@@ -42,11 +43,32 @@ import argparse
 import sys
 from pathlib import Path
 
-from busy_bee import config, db, global_setup, placeholder_store, project_store
+from busy_bee import config, db, global_setup, placeholder_store, process_utils, project_store
 
 
 def _project_root() -> Path:
-    return Path.cwd().resolve()
+    """The project these logs belong to.
+
+    Asks the session where it was started rather than trusting the
+    shell's cwd. dashctl is run through the Bash tool, whose cwd is
+    wherever the agent last `cd`'d -- into a `backend/` subdirectory,
+    or into the session's scratchpad under /tmp -- which has nothing to
+    do with which project the session is working on. Taking the project
+    from that is what let a session started in a perfectly ordinary
+    repo register a *second* project mid-turn, named after a
+    subdirectory, and split its status across two dashboard cards.
+
+    Falls back to the shell's cwd when the session directory isn't
+    available (dashctl run by hand outside Claude Code) or doesn't
+    identify a project on its own -- notably a session started in
+    $HOME, where the directory being worked in is the better guess."""
+    session_cwd = process_utils.claude_session_cwd()
+    if session_cwd is not None and (
+        config.enclosing_project(session_cwd) is not None
+        or config.repo_root_for(session_cwd) is not None
+    ):
+        return config.project_root_for(session_cwd)
+    return config.project_root_for(Path.cwd())
 
 
 _LOG_TYPES = ("done", "todo", "blocker", "question", "summary")
@@ -91,7 +113,10 @@ def cmd_resolve(item_type: str, item_id: str) -> int:
 
 
 def cmd_init(name: str | None) -> int:
-    root = _project_root()
+    # The current directory itself, not the project it may sit inside:
+    # `init` is the explicit way to track a subdirectory (a repo nested
+    # in another one, say) as a project in its own right.
+    root = Path.cwd().resolve()
     project_name = name or root.name
     config.add_project(project_name, str(root))
     status_path = config.project_status_path(root)

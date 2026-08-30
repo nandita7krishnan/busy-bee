@@ -91,11 +91,14 @@ def main() -> int:
         payload = {}
 
     cwd = payload.get("cwd") or str(Path.cwd())
-    project_root = Path(cwd).expanduser().resolve()
+    cwd_path = Path(cwd).expanduser().resolve()
 
     # Same rule the `dashctl` log commands use, so both entry points
-    # track (and skip) exactly the same directories.
-    config.auto_register(project_root)
+    # track (and skip) exactly the same directories -- including
+    # resolving a subdirectory to the project that contains it rather
+    # than registering it as a project of its own.
+    config.auto_register(cwd_path)
+    project_root = config.project_root_for(cwd_path)
     if project_root not in {Path(p["path"]) for p in config.list_projects()}:
         # Deliberately not tracked (notably $HOME, which isn't a
         # project) -- nothing to log against.
