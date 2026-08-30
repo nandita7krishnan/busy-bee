@@ -141,15 +141,19 @@ class Api:
             # Fetched once per project, then split by tty below -- each
             # blocker/question already carries the tty that logged it,
             # so it can attach to that specific session's card instead
-            # of the whole project. Anything whose tty isn't a currently
-            # live session (no session block to attach to) falls back
-            # to the project-level badge so it's never dropped.
+            # of the whole project. Anything no session card claims is
+            # reattached to one afterwards (see the `stale` pass below);
+            # the project-level lists are only for a card that has no
+            # session blocks at all.
             blockers_all = [
                 {
                     "id": row["id"],
                     "text": row["text"],
                     "tty": row["terminal_tty"],
                     "session_id": row["session_id"],
+                    # Flipped by the reattachment pass below for a flag
+                    # shown under a session that didn't raise it.
+                    "stale": False,
                 }
                 for row in db.get_unresolved(p["name"], "blocker")
             ]
@@ -159,6 +163,9 @@ class Api:
                     "text": row["text"],
                     "tty": row["terminal_tty"],
                     "session_id": row["session_id"],
+                    # Flipped by the reattachment pass below for a flag
+                    # shown under a session that didn't raise it.
+                    "stale": False,
                 }
                 for row in db.get_unresolved(p["name"], "question")
             ]
@@ -216,6 +223,48 @@ class Api:
                         "questions": session_questions,
                     }
                 )
+
+            # Every flag a session card didn't claim still has to end up
+            # *on a card*. Rendered at the project level it reads as
+            # something the project as a whole is stuck on, when a
+            # blocker or question is always one specific session sitting
+            # there waiting on a reply -- and on a project with several
+            # sessions it gives no clue which terminal to go answer in.
+            #
+            # A flag whose own session has ended is resolved outright by
+            # project_store.auto_resolve_dead_sessions -- including the
+            # /clear case, where the session was replaced inside a still
+            # -live terminal -- so this is not where those come to rest;
+            # what reaches here is a flag in the gap before the next
+            # aggregator pass, or one from a terminal that closed while
+            # the project still has other sessions open.
+            #
+            # It goes to its own terminal's current card when that tty is
+            # still live, else to this project's most recently active
+            # session, and is marked `stale` either way so the UI can
+            # show it as inherited rather than as something the agent
+            # sitting there now raised. It also takes on its host card's
+            # tty, so clicking it focuses the terminal it's being shown
+            # under instead of opening a fresh window onto a dead one.
+            by_tty = {s["tty"]: s for s in sessions}
+            for key, flags in (("blockers", blockers_all), ("questions", questions_all)):
+                for flag in flags:
+                    if flag["id"] in attached_flag_ids:
+                        continue
+                    # sessions follows db.get_project_ttys' order, most
+                    # recently active first.
+                    host = by_tty.get(flag["tty"]) or (sessions[0] if sessions else None)
+                    if host is None:
+                        # No session blocks on this card to attach to at
+                        # all -- only a project just activated from a
+                        # placeholder renders that way. The project-level
+                        # lists below are what keep the flag from being
+                        # dropped in that one case.
+                        continue
+                    flag["stale"] = True
+                    flag["tty"] = host["tty"]
+                    host[key].append(flag)
+                    attached_flag_ids.add(flag["id"])
 
             # Session-scoped done/todo stay broken out per-session (above)
             # rather than pooled here, to avoid interleaving unrelated
