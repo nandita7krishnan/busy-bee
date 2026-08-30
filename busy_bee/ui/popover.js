@@ -60,9 +60,20 @@ function renderFlagLine(item, type) {
   // takes you there, same as clicking the project name -- to that
   // item's own session if it still has one, else the project's last
   // known terminal.
+  //
+  // A `stale` flag is one the session it's sitting under didn't raise
+  // -- the session that did was replaced in that terminal (a /clear, or
+  // a second `claude` in the same window) before anyone answered it. It
+  // still belongs on a card rather than loose at the project level, so
+  // it's shown muted, and labelled, instead of looking like something
+  // the agent there now is stuck on.
   const ttyAttr = item.tty ? ` data-tty="${escapeHtml(item.tty)}"` : "";
+  const staleClass = item.stale ? " stale" : "";
+  const staleAttr = item.stale
+    ? ` title="Raised by an earlier session in this terminal"`
+    : "";
   return `
-    <div class="flag-line ${type}" data-open-terminal${ttyAttr}>
+    <div class="flag-line ${type}${staleClass}" data-open-terminal${ttyAttr}${staleAttr}>
       <span class="dot"></span>
       <span class="item-text">${escapeHtml(item.text)}</span>
     </div>
@@ -183,13 +194,21 @@ function renderRealCard(project) {
   const hasSessions = project.sessions.length > 0;
   const expanded = true; // always expanded by default; chevron can still collapse manually
 
+  // Counts the flags inside session blocks too, not just the card's own
+  // -- with every flag now attached to a session (see get_projects'
+  // reattachment pass), a header badge built on project.blockers alone
+  // would read zero on every card, and a collapsed card (whose session
+  // blocks are hidden entirely) would show no sign that something is
+  // waiting on the user.
+  const countFlags = (kind) =>
+    project[kind].length +
+    project.sessions.reduce((n, s) => n + (s[kind] || []).length, 0);
+  const blockerCount = countFlags("blockers");
+  const questionCount = countFlags("questions");
+
   const badges = [
-    project.blockers.length
-      ? `<span class="badge blocker">${project.blockers.length}</span>`
-      : "",
-    project.questions.length
-      ? `<span class="badge question">${project.questions.length}</span>`
-      : "",
+    blockerCount ? `<span class="badge blocker">${blockerCount}</span>` : "",
+    questionCount ? `<span class="badge question">${questionCount}</span>` : "",
   ].join("");
 
   const flagsHtml = hasFlags

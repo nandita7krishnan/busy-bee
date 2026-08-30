@@ -82,6 +82,52 @@ def test_auto_resolve_dead_sessions_clears_flag_left_on_a_reused_tty(tmp_path, m
     assert resolved["resolved_at"] is not None
 
 
+def test_auto_resolve_dead_sessions_clears_flag_from_a_cleared_session(tmp_path, monkeypatch):
+    # A `/clear` in a still-open terminal: same tty, same `claude`
+    # process (so its start time is unchanged and the tty stays live),
+    # but a brand new session_id. The question was asked of a
+    # conversation that no longer exists -- nobody can answer it and no
+    # reply will ever clear it, so it shouldn't sit on the dashboard
+    # forever.
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: "session-old")
+    item = project_store.add_item(tmp_path, "question", "which editor?")
+    # The SessionStart hook's marker for the session that replaced it.
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: "session-new")
+    project_store.mark_session_start(tmp_path)
+
+    changed = project_store.auto_resolve_dead_sessions(
+        tmp_path,
+        live_ttys={"ttys002"},
+        session_started_at={"ttys002": _now_plus(seconds=-60)},
+    )
+
+    assert changed is True
+    resolved = next(i for i in project_store.all_items(tmp_path) if i["id"] == item["id"])
+    assert resolved["resolved_at"] is not None
+
+
+def test_auto_resolve_dead_sessions_keeps_flag_when_another_tty_moved_on(tmp_path, monkeypatch):
+    # A newer session on a *different* tty says nothing about this one --
+    # only being replaced in its own terminal ends a session.
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: "session-a")
+    item = project_store.add_item(tmp_path, "blocker", "still waiting")
+    monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys003")
+    monkeypatch.setattr(project_store.process_utils, "current_session_id", lambda: "session-b")
+    project_store.mark_session_start(tmp_path)
+
+    changed = project_store.auto_resolve_dead_sessions(
+        tmp_path,
+        live_ttys={"ttys002", "ttys003"},
+        session_started_at={"ttys002": _now_plus(seconds=-60), "ttys003": _now_plus(seconds=-60)},
+    )
+
+    assert changed is False
+    still_open = next(i for i in project_store.all_items(tmp_path) if i["id"] == item["id"])
+    assert still_open["resolved_at"] is None
+
+
 def test_auto_resolve_dead_sessions_keeps_flags_from_the_session_still_running(tmp_path, monkeypatch):
     monkeypatch.setattr(project_store.process_utils, "find_claude_ancestor_tty", lambda: "ttys002")
     item = project_store.add_item(tmp_path, "blocker", "this session's blocker")

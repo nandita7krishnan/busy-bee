@@ -339,6 +339,17 @@ body {
 .flag-line.blocker .dot { background: var(--coral); }
 .flag-line.question .dot { background: var(--amber); }
 
+/* Inherited from a session that was replaced in this terminal before
+   anyone answered it (renderFlagLine's `stale`) -- still on the card
+   that can answer it, but visibly not this session's own. */
+.flag-line.stale {
+  opacity: 0.62;
+}
+
+.flag-line.stale .item-text {
+  font-style: italic;
+}
+
 .flag-line .item-text {
   flex: 1;
   min-width: 0;

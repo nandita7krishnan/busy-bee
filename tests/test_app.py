@@ -127,12 +127,11 @@ def test_get_projects_does_not_leak_old_sessions_history_into_reused_tty(monkeyp
 def test_get_projects_nests_orphaned_flag_under_its_own_project_card(monkeypatch):
     # Regression test: a blocker/question logged from a tty that has
     # since closed must still surface -- but only inside the *same*
-    # project's own entry (as a project-level fallback, per get_projects'
-    # "never dropped" comment), never detached from every project or
-    # bled into a different one. This is what popover.js relies on to
-    # keep every flag line inside its owning card -- see renderCard,
-    # which nests project.blockers/questions inside that same project's
-    # <div class="card">.
+    # project's own entry (on one of its session cards), never detached
+    # from every project or bled into a different one. This is what
+    # popover.js relies on to keep every flag line inside its owning
+    # card -- see renderCard, which nests session blocks inside that
+    # same project's <div class="card">.
     db.upsert_project("proj-a", "/tmp/proj-a")
     db.upsert_project("proj-b", "/tmp/proj-b")
     # proj-a has one still-live session (ttys001) and one orphaned
@@ -157,10 +156,20 @@ def test_get_projects_nests_orphaned_flag_under_its_own_project_card(monkeypatch
     projects = {p["name"]: p for p in api.get_projects()}
 
     assert len(projects) == 2
-    assert [q["text"] for q in projects["proj-a"]["questions"]] == ["still needs an answer"]
+    # On proj-a's live session card, not loose at the project level: a
+    # question is always one terminal waiting on a reply, and this is
+    # the only terminal of proj-a's left to answer it in.
+    assert projects["proj-a"]["questions"] == []
+    orphan = projects["proj-a"]["sessions"][0]["questions"]
+    assert [q["text"] for q in orphan] == ["still needs an answer"]
+    # Flagged as not this session's own, and pointed at the terminal
+    # it's now shown under rather than at the closed one.
+    assert orphan[0]["stale"] is True
+    assert orphan[0]["tty"] == "ttys001"
     # Never attached to the wrong project, and never left floating
     # without an owning project entry at all.
     assert projects["proj-b"]["questions"] == []
+    assert projects["proj-b"]["sessions"][0]["questions"] == []
 
 
 def test_get_projects_drops_project_once_its_only_session_closes(monkeypatch):
@@ -265,11 +274,12 @@ def test_session_card_shows_only_its_own_blockers_and_questions(monkeypatch):
     assert project["blockers"] == [] and project["questions"] == []
 
 
-def test_session_card_excludes_flags_raised_by_an_earlier_session_on_that_tty(monkeypatch):
+def test_session_card_marks_flags_raised_by_an_earlier_session_on_that_tty(monkeypatch):
     # Same reused-tty problem as the done/todo scoping above, for flags:
     # an unresolved blocker from the session that previously held this
-    # tty isn't the current agent's, so it drops to the project-level
-    # fallback rather than showing up as this session's own.
+    # tty isn't the current agent's. It stays on that terminal's card
+    # anyway -- that's where it can be answered -- but marked `stale`
+    # so it doesn't read as this session's own.
     now = datetime.now(timezone.utc).isoformat()
     db.upsert_project("proj", "/tmp/proj")
     _log("proj", "blocker", "old session's blocker", "ttys009", "2020-01-01T00:00:00+00:00",
@@ -282,9 +292,67 @@ def test_session_card_excludes_flags_raised_by_an_earlier_session_on_that_tty(mo
 
     project = app.Api().get_projects()[0]
 
-    assert project["sessions"][0]["blockers"] == []
-    # Still surfaced somewhere -- flags are never silently dropped.
-    assert [b["text"] for b in project["blockers"]] == ["old session's blocker"]
+    inherited = project["sessions"][0]["blockers"]
+    assert [b["text"] for b in inherited] == ["old session's blocker"]
+    assert inherited[0]["stale"] is True
+    # Never loose at the project level -- every flag hangs off a card.
+    assert project["blockers"] == []
+
+
+def test_flag_from_a_superseded_session_stays_on_that_terminals_card(monkeypatch):
+    # A flag whose session was replaced in its own terminal is resolved
+    # by project_store.auto_resolve_dead_sessions, but only on the next
+    # aggregator pass -- until then it matches no live session_id, and
+    # used to fall out of every session card and render loose at the
+    # project level, next to no terminal in particular. In that gap it
+    # belongs on the card for the terminal it was raised in.
+    now = datetime.now(timezone.utc).isoformat()
+    db.upsert_project("proj", "/tmp/proj")
+    _log("proj", "question", "which editor?", "ttys012", now,
+         session_id="session-cleared", source_id="a1")
+    _log("proj", "done", "after the clear", "ttys012", now,
+         session_id="session-fresh", source_id="b1")
+    # A second, unrelated live session -- the flag must not drift onto it.
+    _log("proj", "done", "other terminal", "ttys013", now,
+         session_id="session-other", source_id="c1")
+
+    monkeypatch.setattr(process_utils.subprocess, "run", _live_ps("ttys012", "ttys013"))
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+
+    project = app.Api().get_projects()[0]
+    by_tty = {s["tty"]: s for s in project["sessions"]}
+
+    assert [q["text"] for q in by_tty["ttys012"]["questions"]] == ["which editor?"]
+    assert by_tty["ttys012"]["questions"][0]["stale"] is True
+    assert by_tty["ttys013"]["questions"] == []
+    assert project["questions"] == []
+
+
+def test_flag_from_a_closed_terminal_lands_on_the_newest_session_card(monkeypatch):
+    # Its own terminal is gone, so there's no card of its own to sit on
+    # -- it goes to the project's most recently active session rather
+    # than to the project itself, and points at that session's terminal
+    # so clicking it lands somewhere that exists.
+    now = datetime.now(timezone.utc).isoformat()
+    older = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    db.upsert_project("proj", "/tmp/proj")
+    _log("proj", "blocker", "needs a key", "ttys099", older,
+         session_id="session-gone", source_id="a1")
+    _log("proj", "done", "older session", "ttys001", older,
+         session_id="session-1", source_id="b1")
+    _log("proj", "done", "newest session", "ttys002", now,
+         session_id="session-2", source_id="c1")
+
+    monkeypatch.setattr(process_utils.subprocess, "run", _live_ps("ttys001", "ttys002"))
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+
+    project = app.Api().get_projects()[0]
+    by_tty = {s["tty"]: s for s in project["sessions"]}
+
+    assert [b["text"] for b in by_tty["ttys002"]["blockers"]] == ["needs a key"]
+    assert by_tty["ttys002"]["blockers"][0]["tty"] == "ttys002"
+    assert by_tty["ttys001"]["blockers"] == []
+    assert project["blockers"] == []
 
 
 def test_session_card_keeps_flags_that_predate_session_id_tracking(monkeypatch):
@@ -302,6 +370,7 @@ def test_session_card_keeps_flags_that_predate_session_id_tracking(monkeypatch):
     project = app.Api().get_projects()[0]
 
     assert [b["text"] for b in project["sessions"][0]["blockers"]] == ["legacy blocker"]
+    assert project["sessions"][0]["blockers"][0]["stale"] is False
     assert project["blockers"] == []
 
 

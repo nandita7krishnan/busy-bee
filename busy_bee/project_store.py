@@ -76,6 +76,43 @@ def mark_session_start(project_root: Path) -> dict:
     return add_item(project_root, "session_start", "session started", source="hook")
 
 
+def _superseded_session_ids(items: list[dict]) -> set[str]:
+    """Session ids that a *later* session has since replaced on the same
+    tty -- i.e. sessions that are definitely over, whether the terminal
+    is still open or not.
+
+    Read off this project's own history: for each tty, the session_id on
+    its most recent item is the one running there now (the SessionStart
+    hook logs an item the instant a session begins, so this is current
+    within one command), and every other session_id seen on that tty
+    belongs to a conversation that has already been superseded.
+
+    Deliberately conservative in two ways. Sessions with no id at all
+    (items predating session tracking) are never included -- there's
+    nothing to compare. And a tty is only judged against sessions seen
+    *in this project's* status.json: a session that `cd`'d away to
+    another project leaves this file's newest entry for that tty
+    pointing at itself, so nothing here is called superseded without
+    positive evidence of a newer session in the same place."""
+    latest_by_tty: dict[str, dict] = {}
+    for item in items:
+        tty = item.get("terminal_tty")
+        if not tty or not item.get("session_id"):
+            continue
+        current = latest_by_tty.get(tty)
+        if current is None or item["created_at"] > current["created_at"]:
+            latest_by_tty[tty] = item
+    superseded = set()
+    for item in items:
+        tty = item.get("terminal_tty")
+        session_id = item.get("session_id")
+        if not tty or not session_id:
+            continue
+        if latest_by_tty[tty]["session_id"] != session_id:
+            superseded.add(session_id)
+    return superseded
+
+
 def auto_resolve_dead_sessions(
     project_root: Path, live_ttys: set[str], session_started_at: dict[str, str] | None = None
 ) -> bool:
@@ -89,24 +126,41 @@ def auto_resolve_dead_sessions(
     left for manual `dashctl resolve`. Returns True if anything changed,
     so the caller can skip an unnecessary rewrite.
 
-    A session counts as ended either because its terminal closed (its
-    tty is gone from live_ttys) or because the tty outlived it: macOS
-    hands a closed window's tty number to the next one, so a flag can
-    sit on a tty that is live again while the session that raised it is
-    long gone. `session_started_at` (tty -> ISO8601, from
-    process_utils.claude_session_start_times) catches that second case
-    -- anything logged before the `claude` currently on that tty
-    started belongs to a dead session. Ttys missing from it are judged
-    on liveness alone, as before."""
+    A session counts as ended for any of three reasons. Its terminal
+    closed (its tty is gone from live_ttys). Or the tty outlived it:
+    macOS hands a closed window's tty number to the next one, so a flag
+    can sit on a tty that is live again while the session that raised it
+    is long gone -- `session_started_at` (tty -> ISO8601, from
+    process_utils.claude_session_start_times) catches that, since
+    anything logged before the `claude` currently on that tty started
+    belongs to a dead session. Ttys missing from it are judged on
+    liveness alone, as before.
+
+    Or -- the case neither of those sees -- the session was replaced
+    *inside* a still-open terminal by a `/clear`, which starts a fresh
+    session_id in the same `claude` process. The tty is live and the
+    process start time is unchanged, so both rules above leave the flag
+    open forever, even though the session that raised it no longer
+    exists and its context is gone: nobody can answer it, and no reply
+    will ever clear it (resolve_flags_on_user_reply is scoped by
+    session_id too). _superseded_session_ids spots it the only way this
+    file can -- a later item on the same tty carrying a different
+    session_id, which the SessionStart hook logs the moment the
+    replacement session begins."""
     items = _load(project_root)
     started_at = session_started_at or {}
+    superseded = _superseded_session_ids(items)
     changed = False
     for item in items:
         tty = item.get("terminal_tty")
         if item["type"] not in ("blocker", "question") or item["resolved_at"] is not None or not tty:
             continue
-        if tty in live_ttys and not process_utils.logged_before_session_start(
-            item["created_at"], started_at.get(tty)
+        if (
+            tty in live_ttys
+            and item.get("session_id") not in superseded
+            and not process_utils.logged_before_session_start(
+                item["created_at"], started_at.get(tty)
+            )
         ):
             continue
         item["resolved_at"] = _now()
