@@ -85,16 +85,95 @@ def list_projects() -> list[ProjectConfig]:
     return load_config().get("projects", [])
 
 
+def enclosing_project(path: str | Path) -> ProjectConfig | None:
+    """The tracked project `path` belongs to -- itself, if it's a
+    tracked root, otherwise the nearest tracked ancestor. Returns None
+    if it sits outside every tracked project.
+
+    Subdirectories matter because a session's cwd isn't always the
+    project root: opening Claude Code in `my-app/backend` (or running
+    `dashctl` from there) is still work on `my-app`. Matching tracked
+    roots by exact path only, it read as a directory nothing knew
+    about, so it got registered as a second project called "backend"
+    sitting next to its own parent on the dashboard, with its status
+    split across two cards.
+
+    Nearest, not first, when tracked projects nest: a repo explicitly
+    registered inside another one (via `dashctl init`) was tracked
+    separately on purpose, so work in it belongs to the inner project,
+    not the outer."""
+    root = Path(path).expanduser().resolve()
+    candidates = [
+        p for p in list_projects() if root == Path(p["path"]) or Path(p["path"]) in root.parents
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: len(Path(p["path"]).parts))
+
+
+def repo_root_for(path: str | Path) -> Path | None:
+    """The top of the git repository `path` sits in, or None if it
+    isn't in one.
+
+    This is what makes a directory a *project* rather than just a
+    directory. Without it, "project" meant "whatever directory the
+    session happened to open in", so the first session started in
+    `my-app/backend` registered `backend` -- and a later session
+    started in `my-app` itself then registered that too, as a second,
+    unrelated-looking project for the same repo. enclosing_project only
+    catches the second of those; by then the wrong name is already the
+    one on the dashboard.
+
+    Walks up looking for `.git` instead of shelling out to `git
+    rev-parse`: this runs from hooks on every session start and every
+    user prompt, where a subprocess per call is a real cost, and a
+    `.git` entry (a directory normally, a file in a worktree or
+    submodule) is exactly what git itself looks for. Stops before
+    $HOME, so a dotfiles repo checked out at ~ doesn't turn the whole
+    home directory into one giant project."""
+    root = Path(path).expanduser().resolve()
+    home = Path.home()
+    for candidate in (root, *root.parents):
+        if candidate == home or candidate == candidate.parent:
+            return None
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def project_root_for(path: str | Path) -> Path:
+    """The directory status for `path` should be logged against: the
+    tracked project containing it, else the repository it's part of,
+    else `path` itself (the caller then decides whether to register it
+    -- see auto_register).
+
+    A tracked project wins over the repository root because tracking it
+    was deliberate: a subdirectory registered with `dashctl init`, or a
+    project whose folder isn't a repo at all, shouldn't be silently
+    re-pointed at some enclosing repo."""
+    enclosing = enclosing_project(path)
+    if enclosing is not None:
+        return Path(enclosing["path"])
+    return repo_root_for(path) or Path(path).expanduser().resolve()
+
+
 def auto_register(project_root: Path) -> bool:
     """Registers a directory under its own name if it isn't already
-    tracked, so a project starts appearing on the dashboard the moment
-    someone works in it -- no separate `dashctl init` step. Returns
-    True if it was newly registered.
+    part of a tracked project, so a project starts appearing on the
+    dashboard the moment someone works in it -- no separate `dashctl
+    init` step. Returns True if it was newly registered.
 
     Lives here rather than in cli.py because two entry points need the
     exact same rule: `dashctl <log command>` (cli.py) and the
     SessionStart hook, which registers as soon as a session opens in an
     untracked directory instead of waiting for its first log.
+
+    Registers the project the directory belongs to, not the directory
+    itself: a subdirectory of an already-tracked project isn't a new
+    project (see enclosing_project), and a directory inside a git repo
+    registers the repo (see repo_root_for) -- otherwise the name and
+    identity a project gets are decided by wherever its first session
+    happened to be started.
 
     Skips the home directory itself -- a Claude Code session run
     directly in $HOME (not inside an actual project) would otherwise
@@ -104,8 +183,9 @@ def auto_register(project_root: Path) -> bool:
     root = Path(project_root).expanduser().resolve()
     if root == Path.home():
         return False
-    if str(root) in {p["path"] for p in list_projects()}:
+    if enclosing_project(root) is not None:
         return False
+    root = project_root_for(root)
     add_project(root.name, str(root))
     return True
 

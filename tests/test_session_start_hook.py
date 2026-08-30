@@ -118,3 +118,37 @@ def test_new_session_in_reused_tty_immediately_takes_over_the_tty(monkeypatch, t
         (i for i in items if i.get("terminal_tty")), key=lambda i: i["created_at"]
     )
     assert latest_with_tty["session_id"] == "session-new"
+
+
+def test_subdirectory_of_a_tracked_project_is_not_a_new_project(monkeypatch, tmp_path):
+    # A session opened in `my-app/backend` is work on `my-app`: it used
+    # to register "backend" as a second project of its own, splitting
+    # the same work across two dashboard cards.
+    project_dir = tmp_path / "point-not-so-mid"
+    subdir = project_dir / "backend"
+    subdir.mkdir(parents=True)
+    config.add_project("point-not-so-mid", str(project_dir))
+
+    assert _run(monkeypatch, subdir) == 0
+
+    assert [p["name"] for p in config.list_projects()] == ["point-not-so-mid"]
+    assert [i["type"] for i in project_store.all_items(project_dir)] == ["session_start"]
+    assert not (subdir / ".claude-dashboard").exists()
+
+
+def test_first_session_in_a_subdirectory_registers_the_repo(monkeypatch, tmp_path):
+    # Nothing tracked yet: the project has to be identified by the repo
+    # it belongs to, or it gets named after whichever directory the
+    # first session was started in.
+    repo = tmp_path / "point-not-so-mid"
+    subdir = repo / "backend"
+    subdir.mkdir(parents=True)
+    (repo / ".git").mkdir()
+
+    assert _run(monkeypatch, subdir) == 0
+
+    assert [(p["name"], p["path"]) for p in config.list_projects()] == [
+        ("point-not-so-mid", str(repo))
+    ]
+    assert [i["type"] for i in project_store.all_items(repo)] == ["session_start"]
+    assert not (subdir / ".claude-dashboard").exists()

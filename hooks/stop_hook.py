@@ -50,7 +50,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from busy_bee import process_utils, project_store  # noqa: E402
+from busy_bee import config, process_utils, project_store  # noqa: E402
 
 RECENT_WINDOW_SECONDS = 120
 SUMMARY_INTERVAL = 10  # every Nth turn, starting with the first
@@ -129,7 +129,9 @@ def main() -> int:
         return 0
 
     cwd = payload.get("cwd") or str(Path.cwd())
-    project_root = Path(cwd)
+    # A session opened in a subdirectory is still working on the
+    # project that contains it, and logs against that project's store.
+    project_root = config.project_root_for(cwd)
 
     status_file = project_root / ".claude-dashboard" / "status.json"
     if not status_file.exists():

@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 
 def _ppid_and_comm(pid: str) -> tuple[str, str] | None:
@@ -31,10 +32,10 @@ def _ppid_and_comm(pid: str) -> tuple[str, str] | None:
     return ppid.strip(), comm.strip()
 
 
-def find_claude_ancestor_tty(max_hops: int = 20) -> str | None:
-    """Returns the bare tty device name (e.g. "ttys002") of the nearest
-    ancestor process named `claude`, or None if there isn't one (e.g.
-    dashctl was run outside a Claude Code session)."""
+def find_claude_ancestor_pid(max_hops: int = 20) -> str | None:
+    """The pid of the nearest ancestor process named `claude` -- the
+    session this process is running inside -- or None if there isn't
+    one (e.g. dashctl was run by hand in a plain terminal)."""
     pid = str(os.getpid())
     for _ in range(max_hops):
         info = _ppid_and_comm(pid)
@@ -42,12 +43,57 @@ def find_claude_ancestor_tty(max_hops: int = 20) -> str | None:
             return None
         ppid, comm = info
         if comm.rsplit("/", 1)[-1] == "claude":
-            result = subprocess.run(["ps", "-o", "tty=", "-p", pid], capture_output=True, text=True)
-            tty = result.stdout.strip()
-            return tty if tty and tty != "??" else None
+            return pid
         if not ppid or ppid in ("0", "1"):
             return None
         pid = ppid
+    return None
+
+
+def find_claude_ancestor_tty(max_hops: int = 20) -> str | None:
+    """Returns the bare tty device name (e.g. "ttys002") of the nearest
+    ancestor process named `claude`, or None if there isn't one (e.g.
+    dashctl was run outside a Claude Code session)."""
+    pid = find_claude_ancestor_pid(max_hops)
+    if pid is None:
+        return None
+    result = subprocess.run(["ps", "-o", "tty=", "-p", pid], capture_output=True, text=True)
+    tty = result.stdout.strip()
+    return tty if tty and tty != "??" else None
+
+
+def claude_session_cwd() -> Path | None:
+    """The directory the `claude` session this process is running
+    inside was started in, or None outside a session.
+
+    This is the directory that identifies the project, and it is *not*
+    the same as `Path.cwd()`. A dashctl call comes from the Bash tool,
+    whose cwd is wherever the agent last `cd`'d -- a `backend/`
+    subdirectory it's working in, or the session scratchpad under
+    /tmp. Reading the project off that meant a session opened in a repo
+    could register a second project mid-turn, named after whichever
+    directory the agent had wandered into. `claude`'s own cwd doesn't
+    move (the Bash tool tracks directories internally, not at the OS
+    level), so it still points at where the session began.
+
+    `lsof` because macOS `ps` can't report another process's cwd; the
+    lookup is one short call (~20ms), and any failure -- no lsof, a
+    process that vanished, unparseable output -- just falls back to
+    None so the caller keeps its old cwd-based behaviour."""
+    pid = find_claude_ancestor_pid() or os.environ.get("CLAUDE_PID")
+    if not pid:
+        return None
+    try:
+        result = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True
+        )
+    except OSError:
+        return None
+    for line in result.stdout.splitlines():
+        # -Fn output is one field per line, each prefixed by its type:
+        # "n" is the name -- the cwd path -- for the `cwd` fd.
+        if line.startswith("n/"):
+            return Path(line[1:])
     return None
 
 

@@ -51,7 +51,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from busy_bee import process_utils, project_store  # noqa: E402
+from busy_bee import config, process_utils, project_store  # noqa: E402
 
 
 def main() -> int:
@@ -61,7 +61,10 @@ def main() -> int:
         payload = {}
 
     cwd = payload.get("cwd") or str(Path.cwd())
-    project_root = Path(cwd).expanduser().resolve()
+    # A session opened in a subdirectory is still working on the
+    # project that contains it -- its flags live in that project's
+    # store, not in a .claude-dashboard of the subdirectory's own.
+    project_root = config.project_root_for(cwd)
 
     if not (project_root / ".claude-dashboard" / "status.json").exists():
         # Project isn't tracked by busy-bee -- no flags to clear.
