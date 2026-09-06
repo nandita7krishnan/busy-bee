@@ -19,6 +19,32 @@ def isolated_db(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def no_real_machine_access(monkeypatch):
+    """Seal the two boundaries where app.py reaches the real machine.
+
+    terminal_launcher drives Terminal.app over AppleScript: a test that
+    walks one of those paths unstubbed opens a window on the
+    developer's desktop, which is how
+    test_activate_placeholder_migrates_... spawned a live `claude` in a
+    pytest tmp dir. process_utils shells out to `ps`, so an unstubbed
+    test reads whichever Claude sessions happen to be running and goes
+    flaky with them.
+
+    Both were previously left to each test to remember individually --
+    opt-in isolation, where forgetting is silent. Default them here so
+    a test has to opt out; the ones asserting on specific calls or
+    specific `ps` output re-patch these themselves.
+    """
+    monkeypatch.setattr(app.terminal_launcher, "resume_project", lambda *a, **k: None)
+    monkeypatch.setattr(app.terminal_launcher, "start_new_session", lambda *a, **k: None)
+    monkeypatch.setattr(app.terminal_launcher, "session_title_for_tty", lambda tty: None)
+    monkeypatch.setattr(
+        process_utils.subprocess, "run", lambda cmd, **k: FakeResult(stdout="")
+    )
+    yield
+
+
 class FakeWindow:
     """Stands in for the popover's webview.Window -- just enough surface
     for dialogs.choose_folder (create_file_dialog) and
