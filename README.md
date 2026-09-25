@@ -1,3 +1,4 @@
+<img width="194" height="110" alt="final_demo" src="https://github.com/user-attachments/assets/a7f006c7-a6d5-48b0-ab98-dc4808fc12a1" />
 # busy-bee
 
 A macOS menu bar app that gives a single glanceable view across all
