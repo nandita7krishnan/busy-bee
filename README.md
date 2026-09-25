@@ -10,7 +10,8 @@ moment you create its folder.
 
 See [`docs/prd.md`](./docs/prd.md) for the full spec this was built from.
 
-<img width="194" height="110" alt="final_demo" src="https://github.com/user-attachments/assets/2789a200-a3c6-4e21-9732-617ba4969247" />
+
+
 
 
 ## Requirements
